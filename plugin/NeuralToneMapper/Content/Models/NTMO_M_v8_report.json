@@ -1,0 +1,39 @@
+{
+  "onnx": "C:\\Users\\BH2025~1\\AppData\\Local\\Temp\\ntmo_v8_final\\ntmo_curve.onnx",
+  "opset": 17,
+  "size": "M",
+  "params": 326567,
+  "input_shape": [
+    1,
+    49,
+    72,
+    128
+  ],
+  "output_shape": [
+    1,
+    72
+  ],
+  "ops": [
+    "Add",
+    "Constant",
+    "Conv",
+    "Gather",
+    "Gemm",
+    "Identity",
+    "LayerNormalization",
+    "MatMul",
+    "Mul",
+    "ReduceMean",
+    "Relu",
+    "Sigmoid",
+    "Slice",
+    "Softmax",
+    "Tanh"
+  ],
+  "unexpected_ops": [],
+  "known_unsupported_ops": [],
+  "numeric_max_err": 2.86102294921875e-06,
+  "numeric_ok": true,
+  "monotone_outputs": true,
+  "deployable": true
+}

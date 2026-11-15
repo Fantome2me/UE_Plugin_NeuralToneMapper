@@ -1,0 +1,26 @@
+# Unreal build output
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+*.pdb
+*.obj
+*.sln
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+
+# Training toolkit (large, not part of the plugin runtime)
+Tools/
+.venv*/
+_wheels/
+shards*/
+run_*/
+*.pt
+*.log
+
+# OS
+Thumbs.db
+.DS_Store

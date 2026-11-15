@@ -1,0 +1,173 @@
+// Copyright (c) 2026. All Rights Reserved.
+//
+// Final tone mapping pass. Replaces PostProcessTonemap.usf while the plugin is
+// enabled: UE's own tonemapping pass and combined LUT bake are skipped entirely
+// (see PostProcessing.cpp - ReplacingTonemapper delegates short circuit both).
+//
+// EXPOSURE IS STILL UNREAL'S
+// -------------------------
+// This pass receives PRE-exposure scene colour. PostProcessTonemap.usf applies the
+// exposure chain itself at line 523:
+//
+//   FinalLinearColor = SceneColor.rgb * SceneColorTint
+//                    * (OneOverPreExposure * GlobalExposure * VignetteMask * LocalExposure);
+//
+// Because we replaced that pass we must reproduce it, otherwise the image is wrong by
+// the whole exposure factor. GlobalExposure comes from the very same eye adaptation
+// buffer Unreal's tonemapper reads (GetEyeAdaptationBuffer in SceneTextureParameters.h),
+// so automatic exposure, the exposure compensation curves and every post process
+// exposure setting keep working exactly as before. LocalExposure is the one term we
+// deliberately do NOT reproduce: the plugin's own half-resolution Laplacian replaces
+// it (stacking two local operators overshoots and turns shadows grey).
+//
+// TWO KNOWN DEVIATIONS, both visible only when the corresponding feature is used:
+//   * VignetteMask is treated as 1. Unreal computes it from the vignette settings.
+//   * Film grain is not applied.
+// If a project depends on either, they can be added the same way as exposure.
+//
+// LOCAL GAIN
+// ----------
+// When the local operator is enabled, a half-resolution gain map arrives from
+// NTMOLocal.usf and is upsampled here with a luminance-guided bilateral filter.
+// Plain bilinear is nearly correct already (the gain is smooth by design), but the
+// guided weights keep it from bleeding across strong edges.
+
+#include "NTMOCommon.ush"
+// NOTE: no "PixelShaderUtils.ush" here. This pass is a plain fullscreen pixel shader
+// registered through FPixelShaderUtils::AddFullscreenPass on the C++ side, so the
+// shader itself needs nothing from that header -- and it does not exist at
+// /Engine/Private/PixelShaderUtils.ush on 5.8, which produced a hard compile error.
+
+
+
+Texture2D NTMOSceneColor;
+SamplerState NTMOSceneColorSampler;
+
+Texture2D NTMOBloom;
+SamplerState NTMOBloomSampler;
+
+Texture3D NTMOLut;
+SamplerState NTMOLutSampler;
+
+// Half-res log2 display correction from the learned local Laplacian pass.
+// Smooth by construction (it is a 4x4 learned parameter map times smooth band
+// differences), so a plain bilinear fetch is enough -- the previous 8-tap
+// bilateral upsample is gone.
+Texture2D<float2> NTMOLocalCorrection;
+SamplerState NTMOLocalCorrectionSampler;
+int NTMOLocalEnabled;
+
+
+
+float NTMOLutSize;
+float NTMOLutScale;		// (Size - 1) / Size
+float NTMOLutOffset;	// 0.5 / Size
+
+float NTMOBloomScale;
+int NTMOOutputDevice;
+float NTMOGamma;
+
+
+/** Cheap triangular dither, keeps SDR gradients from banding after quantisation. */
+float NTMO_Dither(float2 PixelPos)
+{
+	float Noise = frac(sin(dot(PixelPos, float2(12.9898f, 78.233f))) * 43758.5453f);
+	return (Noise * 2.0f - 1.0f) / 255.0f;
+}
+
+/** log2 Rec.709 luminance, matching the definition used to build the pyramid. */
+float NTMO_Log2Lum(float3 LinearColor)
+{
+	float L = dot(max(LinearColor, 0.0f), float3(0.2126f, 0.7152f, 0.0722f));
+	return log2(max(L, 1e-7f));
+}
+
+
+// ---- Exposure (Unreal's contract) ---------------------------------------
+// Eye adaptation. Element 0's x is GlobalExposure, exactly as Unreal's tonemapper
+// reads it (PostProcessTonemap.usf).
+StructuredBuffer<float4> NTMOEyeAdaptationBuffer;
+float3 NTMOSceneColorTint;
+int NTMOApplyExposure;
+
+// INPUT SIGNATURE MUST MATCH ScreenPass.usf
+// -----------------------------------------
+// Unreal's fullscreen VS (ScreenPass.usf:12) declares
+//     out noperspective float4 OutUVAndScreenPos : TEXCOORD0;
+//     out float4 OutPosition : SV_POSITION;
+// Declaring this pixel shader as `float2 UV : TEXCOORD0` made the VS/PS signatures
+// incompatible, so D3D12 rejected the PSO with E_INVALIDARG:
+//     "Semantic 'TEXCOORD' is defined for mismatched hardware registers"
+// UE then escalates the failure to the fatal "Shader compilation failures are Fatal",
+// even though the shader itself had compiled perfectly. xy is the UV.
+void MainPS(
+	noperspective float4 UVAndScreenPos : TEXCOORD0,
+	float4 SvPosition : SV_POSITION,
+	out float4 OutColor : SV_Target0)
+{
+	float2 TextureUV = UVAndScreenPos.xy;
+
+	float3 SceneColor = NTMOSceneColor.SampleLevel(NTMOSceneColorSampler, TextureUV, 0).rgb;
+
+	float3 Bloom = NTMOBloom.SampleLevel(NTMOBloomSampler, TextureUV, 0).rgb * NTMOBloomScale;
+
+	// --- Unreal's exposure chain (PostProcessTonemap.usf:523, 526) -----------
+	// GlobalExposure is element 0 of the eye adaptation buffer. Multiplying by it
+	// alone is WRONG and over-brightens by that whole factor: PostProcessTonemap.usf
+	// multiplies by (OneOverPreExposure * GlobalExposure). PostProcessEyeAdaptation.cpp
+	// :1586 states the contract that makes the pair cancel out:
+	//     PreExposure = SceneColorTint * GlobalExposure * VignetteMask * LocalExposure
+	// so (1/PreExposure) * GlobalExposure is ~1 for a stable exposure and the tone
+	// curve here sees scene-referred values.
+	float Exposure = 1.0f;
+	if (NTMOApplyExposure != 0)
+	{
+		const float GlobalExposure = NTMOEyeAdaptationBuffer[0].x;
+		Exposure = View.OneOverPreExposure * GlobalExposure;
+	}
+
+	// SceneColorTint applies to scene colour only; bloom is added afterwards, matching
+	// Unreal's ordering. VignetteMask is assumed 1 (see the header note).
+	float3 LinearColor = SceneColor * NTMOSceneColorTint + Bloom;
+	LinearColor = max(LinearColor, 0.0f) * Exposure;
+
+	// ---- Scene-referred local exposure (pre-curve) -------------------------
+	// Applied to scene luminance BEFORE the tone curve, because that is what a local
+	// exposure physically is. Being pre-curve also means the curve's steep toe amplifies
+	// the lift, which is what makes shadows visibly open -- the v1.0.2/1.0.3 design put
+	// everything after the curve, where dark areas (small display code values) barely
+	// moved.
+	float2 LocalCorrection = float2(0.0f, 0.0f);
+	if (NTMOLocalEnabled != 0)
+	{
+		LocalCorrection = NTMOLocalCorrection.SampleLevel(NTMOLocalCorrectionSampler, TextureUV, 0);
+		LinearColor *= exp2(LocalCorrection.x);
+	}
+
+	// One 3D LUT fetch - identical cost to Unreal's own tonemapper.
+	// The LUT now stores LINEAR display values (the encode moved below), so the learned
+	// local correction can be applied as a proper multiplicative offset in luminance.
+	float3 LutUVW = saturate(NTMO_LinearToLutIndex(LinearColor)) * NTMOLutScale + NTMOLutOffset;
+	float3 Mapped = NTMOLut.SampleLevel(NTMOLutSampler, LutUVW, 0).rgb;
+
+	// ---- Learned local Laplacian correction --------------------------------
+	// A display-referred log2 offset predicted per tile by the network and turned into a
+	// smooth per-pixel field by the correction pass. Applied AFTER the curve so the
+	// curve's shoulder cannot re-compress the restored detail.
+	if (NTMOLocalEnabled != 0)
+	{
+		Mapped *= exp2(LocalCorrection.y);
+	}
+
+	Mapped = saturate(Mapped);
+
+	// Output transfer function, applied last so the correction above stayed linear.
+	float3 Encoded = NTMO_EncodeOutput(Mapped, NTMOOutputDevice, NTMOGamma);
+
+	if (NTMOOutputDevice != NTMO_OUTPUT_PQ && NTMOOutputDevice != NTMO_OUTPUT_SCRGB)
+	{
+		Encoded += NTMO_Dither(SvPosition.xy);
+	}
+
+	OutColor = float4(Encoded, 1.0f);
+}

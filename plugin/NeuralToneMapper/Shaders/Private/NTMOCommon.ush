@@ -1,0 +1,311 @@
+// Copyright (c) 2026. All Rights Reserved.
+//
+// Shared code for the Neural Tone Mapper shaders.
+//
+// Domain conventions (identical to Unreal's own tonemapper):
+//   * Scene colour reaching us in the ReplacingTonemapper callback is already
+//     exposure-resolved. PostProcessEyeAdaptation.cpp:1586 states that
+//     "This computation must match FinalLinearColor in PostProcessTonemap.usf",
+//     and PreExposure is exactly SceneColorTint * GlobalExposure * Vignette * LocalExposure.
+//     Therefore SceneColor * OneOverPreExposure * (those terms) == SceneColor.
+//   * LinearToNitsScale == 100, i.e. 1.0 linear == 100 nits.
+
+#pragma once
+
+// Absolute virtual path, NOT "Common.ush".
+//
+// Once the plugin registers its own virtual shader directory ("/NTMO"), a bare
+// #include "Common.ush" is resolved relative to /NTMO/Private only and fails with
+// "File 'Common.ush' not found" -- which aborted every NTMO shader with a compile
+// error dialog. Engine headers must be referenced through the /Engine mapping.
+#include "/Engine/Private/Common.ush"
+
+#ifndef NTMO_MAX3
+#define NTMO_MAX3
+float NTMO_Max3(float3 V) { return max(V.x, max(V.y, V.z)); }
+float NTMO_Min3(float3 V) { return min(V.x, min(V.y, V.z)); }
+#endif
+
+// ---------------------------------------------------------------------------
+// Display output device ids (kept in sync with EDisplayOutputFormat).
+// ---------------------------------------------------------------------------
+#define NTMO_OUTPUT_SRGB            0
+#define NTMO_OUTPUT_REC709          1
+#define NTMO_OUTPUT_EXPLICIT_GAMMA  2
+#define NTMO_OUTPUT_PQ              3
+#define NTMO_OUTPUT_SCRGB           4
+
+// ---------------------------------------------------------------------------
+// ST-2084 (PQ). Implemented locally so the plugin has no dependency on the
+// engine's private tonemap headers, which change between versions.
+// ---------------------------------------------------------------------------
+#define NTMO_PQ_M1 0.1593017578125
+#define NTMO_PQ_M2 78.84375
+#define NTMO_PQ_C1 0.8359375
+#define NTMO_PQ_C2 18.8515625
+#define NTMO_PQ_C3 18.6875
+
+float NTMO_LinearToST2084(float LinearNits)
+{
+	float Y = saturate(LinearNits / 10000.0f);
+	float Ym1 = pow(Y, NTMO_PQ_M1);
+	return pow((NTMO_PQ_C1 + NTMO_PQ_C2 * Ym1) / (1.0f + NTMO_PQ_C3 * Ym1), NTMO_PQ_M2);
+}
+
+float NTMO_ST2084ToLinear(float PQ)
+{
+	float Np = pow(saturate(PQ), 1.0f / NTMO_PQ_M2);
+	float Num = max(Np - NTMO_PQ_C1, 0.0f);
+	float Den = max(NTMO_PQ_C2 - NTMO_PQ_C3 * Np, 1e-6f);
+	return pow(Num / Den, 1.0f / NTMO_PQ_M1) * 10000.0f;
+}
+
+// ---------------------------------------------------------------------------
+// Curve evaluation
+//
+// 8 knots sampled at uniformly spaced x in [KnotX0, KnotX1] (log2 domain).
+// Interpolated with a Fritsch-Carlson monotone cubic so the mapper can never
+// invert contrast, regardless of what the policy (or a future NN) emits.
+// ---------------------------------------------------------------------------
+#define NTMO_KNOT_COUNT 8
+#define NTMO_KNOT_X0   (-10.0f)
+#define NTMO_KNOT_X1   (  4.0f)
+
+struct FNTMOKnots
+{
+	float4 K01;	// knots 0..3
+	float4 K23;	// knots 4..7
+
+	// Explicit selection instead of dynamic indexing of a uniform array: cheaper
+	// to reason about and cannot trip up back-end constant-buffer indexing.
+	float Get(int I)
+	{
+		float R = 0.0f;
+		R = (I == 0) ? K01.x : R;
+		R = (I == 1) ? K01.y : R;
+		R = (I == 2) ? K01.z : R;
+		R = (I == 3) ? K01.w : R;
+		R = (I == 4) ? K23.x : R;
+		R = (I == 5) ? K23.y : R;
+		R = (I == 6) ? K23.z : R;
+		R = (I == 7) ? K23.w : R;
+		return R;
+	}
+};
+
+/** Monotone cubic (Fritsch-Carlson) evaluation in the log2 domain. */
+float NTMO_EvalCurveLog2(float X, FNTMOKnots K)
+{
+	const float Step = (NTMO_KNOT_X1 - NTMO_KNOT_X0) / (float)(NTMO_KNOT_COUNT - 1);
+
+	float T = clamp((X - NTMO_KNOT_X0) / Step, 0.0f, (float)(NTMO_KNOT_COUNT - 1));
+
+	int I = min((int)floor(T), NTMO_KNOT_COUNT - 2);
+	float U = T - (float)I;
+
+	float Y0 = K.Get(I);
+	float Y1 = K.Get(I + 1);
+
+	float Ym = (I > 0) ? K.Get(I - 1) : Y0;
+	float Yp = (I + 2 < NTMO_KNOT_COUNT) ? K.Get(I + 2) : Y1;
+
+	float M0 = (Y1 - Ym) / (2.0f * Step);
+	float M1 = (Yp - Y0) / (2.0f * Step);
+
+	float Delta = (Y1 - Y0) / Step;
+	if (abs(Delta) < 1e-6f)
+	{
+		M0 = 0.0f;
+		M1 = 0.0f;
+	}
+	else
+	{
+		float A = M0 / Delta;
+		float B = M1 / Delta;
+		float S = A * A + B * B;
+		if (S > 9.0f)
+		{
+			float Tau = 3.0f / sqrt(S);
+			M0 = Tau * A * Delta;
+			M1 = Tau * B * Delta;
+		}
+	}
+
+	float U2 = U * U;
+	float U3 = U2 * U;
+	float H00 = 2.0f * U3 - 3.0f * U2 + 1.0f;
+	float H10 = U3 - 2.0f * U2 + U;
+	float H01 = -2.0f * U3 + 3.0f * U2;
+	float H11 = U3 - U2;
+
+	return H00 * Y0 + H10 * Step * M0 + H01 * Y1 + H11 * Step * M1;
+}
+
+// ---------------------------------------------------------------------------
+// Gamut compression. Moves out-of-gamut colours toward the achromatic axis,
+// which keeps hue stable.
+// ---------------------------------------------------------------------------
+float3 NTMO_GamutCompress(float3 Color, float Strength)
+{
+	if (Strength <= 0.0f)
+	{
+		return Color;
+	}
+
+	float MaxC = NTMO_Max3(Color);
+	if (MaxC <= 1e-6f)
+	{
+		return Color;
+	}
+
+	float Lum = dot(Color, float3(0.2126f, 0.7152f, 0.0722f));
+	return lerp(Color, float3(Lum, Lum, Lum), saturate(Strength));
+}
+
+/**
+ * Hue preserving tone mapping.
+ *
+ * MaxRGB formulation: a single scalar ratio is computed from the brightest
+ * channel and applied uniformly to RGB. Per-channel curves shift hue and are the
+ * root cause of the classic "notorious six" ACES artefacts.
+ *
+ * The operation is still a smooth 3D function of the input colour, so it can be
+ * baked into a 3D LUT - which is exactly what NTMOLutBake.usf does.
+ */
+float3 NTMO_ToneMapMaxRGB(
+	float3 LinearColor,
+	FNTMOKnots K,
+	float Saturation,
+	float GamutCompress,
+	float HighlightDesat,
+	float BlackLift,
+	float MaxNits,
+	float MinNits)
+{
+	float MaxC = NTMO_Max3(LinearColor);
+	if (MaxC <= 1e-8f)
+	{
+		return float3(BlackLift, BlackLift, BlackLift);
+	}
+
+	float OutLog2 = NTMO_EvalCurveLog2(log2(MaxC), K);
+	float OutLinear = exp2(OutLog2);
+
+	// Clamp to the panel's real range (expressed in the 1.0 == 100 nits domain).
+	float PeakLinear = max(MaxNits * 0.01f, 1e-4f);
+	float FloorLinear = MinNits * 0.01f;
+	OutLinear = clamp(OutLinear, FloorLinear, PeakLinear);
+
+	// Single scalar ratio -> hue and saturation relationships are preserved.
+	float3 OutColor = LinearColor * (OutLinear / MaxC);
+
+	float Lum = dot(OutColor, float3(0.2126f, 0.7152f, 0.0722f));
+
+	// Highlight desaturation: only pixels that are already close to the panel peak
+	// should trend toward white.
+	//
+	// The previous ramp was saturate(Nits / PeakNits), which reaches 1.0 exactly at the
+	// peak -- and on an SDR panel (peak 100 nits) that means the entire sky and every
+	// bright surface got the FULL desaturation amount. That is why the sky rendered as
+	// flat grey while Unreal's tonemapper kept it blue. The ramp now starts at 60% of
+	// peak and only saturates above it, so mid-tones keep their colour.
+	const float PeakNits = max(MaxNits, 1.0f);
+	const float DesatStart = 0.60f * PeakNits;
+	const float DesatSpan = max(PeakNits - DesatStart, 1.0f);
+	const float DesatAmount = saturate(((OutLinear * 100.0f) - DesatStart) / DesatSpan) * HighlightDesat;
+	OutColor = lerp(OutColor, float3(Lum, Lum, Lum), saturate(DesatAmount));
+
+	OutColor = NTMO_GamutCompress(OutColor, GamutCompress);
+
+	if (abs(Saturation - 1.0f) > 1e-4f)
+	{
+		OutColor = lerp(float3(Lum, Lum, Lum), OutColor, Saturation);
+	}
+
+	return max(OutColor + BlackLift, 0.0f);
+}
+
+/** Encode a linear (1.0 == 100 nits) value for the given output device. */
+/**
+ * sRGB (IEC 61966-2-1) opto-electronic transfer function.
+ *
+ * The previous build used plain pow(1/2.2) for every SDR output device. That is the
+ * BT.1886 / "gamma 2.2" approximation, not sRGB: the two disagree by up to ~1.5% in
+ * the mid-tones and much more near black, where sRGB has a linear segment. Unreal's
+ * tonemapper uses the real sRGB curve, so matching it removes a systematic shadow
+ * offset from every A/B comparison.
+ */
+float3 NTMO_EncodeSRGB(float3 LinearColor)
+{
+	float3 C = saturate(LinearColor);
+	float3 Low = C * 12.92f;
+	float3 High = 1.055f * pow(max(C, 1.0e-8f), 1.0f / 2.4f) - 0.055f;
+	// step + lerp, NOT a ternary: the cross-compiler lowers a vector ?: into
+	// select(scalar, float3, float3), which DXC rejects, and a shader compile failure
+	// here is fatal at PSO creation ("Shader compilation failures are Fatal").
+	const float3 Above = step(0.0031308f, C);
+	return lerp(Low, High, Above);
+}
+
+/**
+ * Rec.709 / BT.1886 OETF (the 1/0.45 power form, with its small linear toe).
+ * This is what Unreal uses for OutputDevice 1.
+ */
+float3 NTMO_EncodeRec709(float3 LinearColor)
+{
+	float3 C = saturate(LinearColor);
+	float3 Low = C * 4.5f;
+	float3 High = 1.099f * pow(max(C, 1.0e-8f), 0.45f) - 0.099f;
+	const float3 Above = step(0.018f, C);
+	return lerp(Low, High, Above);
+}
+
+float3 NTMO_EncodeOutput(float3 LinearColor, int OutputDevice, float Gamma)
+{
+	if (OutputDevice == NTMO_OUTPUT_PQ)
+	{
+		return float3(
+			NTMO_LinearToST2084(LinearColor.r * 100.0f),
+			NTMO_LinearToST2084(LinearColor.g * 100.0f),
+			NTMO_LinearToST2084(LinearColor.b * 100.0f));
+	}
+	else if (OutputDevice == NTMO_OUTPUT_SCRGB)
+	{
+		// scRGB is linear with 1.0 == 80 nits; our domain is 1.0 == 100 nits.
+		return max(LinearColor * (100.0f / 80.0f), 0.0f);
+	}
+	else if (OutputDevice == NTMO_OUTPUT_REC709)
+	{
+		return NTMO_EncodeRec709(LinearColor);
+	}
+
+	// Default: strict sRGB. Only NTMO_OUTPUT_EXPLICIT_GAMMA honours the gamma cvar, so
+	// a project that really wants a plain power curve has to ask for it by name.
+	if (OutputDevice == NTMO_OUTPUT_EXPLICIT_GAMMA)
+	{
+		return pow(saturate(LinearColor), Gamma);
+	}
+
+	return NTMO_EncodeSRGB(LinearColor);
+}
+
+/**
+ * The LUT is indexed in PQ space so HDR highlight precision is preserved with a
+ * 16 bit texture. Values above 10000 nits saturate to index 1.0, which is fine
+ * because the panel peak is enforced inside the bake anyway.
+ */
+float3 NTMO_LinearToLutIndex(float3 LinearColor)
+{
+	return float3(
+		NTMO_LinearToST2084(LinearColor.r * 100.0f),
+		NTMO_LinearToST2084(LinearColor.g * 100.0f),
+		NTMO_LinearToST2084(LinearColor.b * 100.0f));
+}
+
+float3 NTMO_LutIndexToLinear(float3 Index)
+{
+	return float3(
+		NTMO_ST2084ToLinear(Index.r),
+		NTMO_ST2084ToLinear(Index.g),
+		NTMO_ST2084ToLinear(Index.b)) * 0.01f;
+}

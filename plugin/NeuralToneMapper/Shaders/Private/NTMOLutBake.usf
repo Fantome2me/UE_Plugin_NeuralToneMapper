@@ -1,0 +1,106 @@
+// Copyright (c) 2026. All Rights Reserved.
+//
+// Bakes the per-frame tone mapping LUT.
+//
+// Every texel is the full, hue-preserving MaxRGB tone map evaluated at one grid
+// point, so the per-pixel cost at runtime collapses to a single 3D texture fetch
+// (exactly the same shape as Unreal's own ColorGradingLUT path).
+//
+// Because the whole operation is a smooth function of the input colour, tri-linear
+// interpolation between grid points is accurate - which is what makes a 33^3 LUT
+// viable here.
+
+#include "NTMOCommon.ush"
+
+Texture3D<float4> NTMOPlaceholder;	// keeps the shader from being optimised away in some tools
+
+RWTexture3D<float4> RWOutputLUT;
+
+// ---- Curve ---------------------------------------------------------------
+// Two sources, selected by NTMOCurveFromBuffer:
+//   uniforms  -- the analytic policy fills CurveKnots01/23 on the CPU.
+//   buffer    -- the neural network wrote 8 floats on the GPU via NNE's EnqueueRDG.
+// The buffer path exists so the inference result never has to round-trip to the CPU
+// (a readback would stall the GPU every frame).
+float4 CurveKnots01;
+float4 CurveKnots23;
+StructuredBuffer<float> NTMOKnotsBuffer;
+int NTMOCurveFromBuffer;
+
+// Exposure folded into the bake: evaluating ToneMap(gridLinear * Exposure) means the
+// LUT can be sampled with the raw pre-exposure scene colour and still be correct.
+float NTMOExposure;
+
+// ---- Look ----------------------------------------------------------------
+float NTMOSaturation;
+float NTMOGamutCompress;
+float NTMOHighlightDesat;
+float NTMOBlackLift;
+
+// ---- Display -------------------------------------------------------------
+float NTMOMinNits;
+float NTMOMaxNits;
+float NTMOMaxFullFrameNits;
+float NTMOPaperWhiteNits;
+
+int NTMOLutSize;
+
+float3 SampleGridLinear(uint3 Id, uint Size)
+{
+	// Grid coordinate -> PQ index space -> linear.
+	float3 Index = (float3)Id / max((float)(Size - 1), 1.0f);
+	return NTMO_LutIndexToLinear(Index);
+}
+
+[numthreads(4, 4, 4)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	if (any(DispatchThreadId >= (uint3)(uint)NTMOLutSize))
+	{
+		return;
+	}
+
+	FNTMOKnots K;
+	if (NTMOCurveFromBuffer != 0)
+	{
+		K.K01 = float4(NTMOKnotsBuffer[0], NTMOKnotsBuffer[1], NTMOKnotsBuffer[2], NTMOKnotsBuffer[3]);
+		K.K23 = float4(NTMOKnotsBuffer[4], NTMOKnotsBuffer[5], NTMOKnotsBuffer[6], NTMOKnotsBuffer[7]);
+	}
+	else
+	{
+		K.K01 = CurveKnots01;
+		K.K23 = CurveKnots23;
+	}
+
+	// ---- Physical clamp on the curve ---------------------------------------
+	// The tone curve's OUTPUT is a luminance, so it can never exceed the panel's peak
+	// (nor fall below its black level). This is a safety net rather than a stylistic
+	// choice: a curve that maps mid-tones above the peak renders a uniformly blown
+	// image, which is exactly what a mis-predicted knot set produces. min()/max() keep
+	// the sequence monotone, so the LUT still cannot invert contrast -- it can only
+	// flatten the very top, which is what a real clipped highlight looks like anyway.
+	const float LogPeakClamp = log2(max(NTMOMaxNits * 0.01f, 1.0e-4f));
+	const float LogFloorClamp = log2(max(NTMOMinNits * 0.01f, 1.0e-6f)) + 0.01f;
+	K.K01 = clamp(K.K01, LogFloorClamp, LogPeakClamp);
+	K.K23 = clamp(K.K23, LogFloorClamp, LogPeakClamp);
+
+	const float3 SceneLinear = SampleGridLinear(DispatchThreadId, (uint)NTMOLutSize) * NTMOExposure;
+
+	const float3 Mapped = NTMO_ToneMapMaxRGB(
+		SceneLinear,
+		K,
+		NTMOSaturation,
+		NTMOGamutCompress,
+		NTMOHighlightDesat,
+		NTMOBlackLift,
+		NTMOMaxNits,
+		NTMOMinNits);
+
+	// LINEAR display values, deliberately NOT encoded.
+	//
+	// The tonemap shader applies the local Laplacian correction as a multiplicative
+	// exp2() in display space. Multiplying an already PQ-encoded value would be wrong
+	// (PQ is not linear in luminance), so the transfer function moved to the tonemap
+	// shader, after the correction. One pow per pixel is cheap; a wrong gamma is not.
+	RWOutputLUT[DispatchThreadId] = float4(max(Mapped, 0.0f), 1.0f);
+}
