@@ -24,3 +24,6 @@ run_*/
 # OS
 Thumbs.db
 .DS_Store
+
+# Version zips are Release assets, uploaded by hand - not tracked in git
+dist/*.zip
