@@ -2,6 +2,24 @@
 
 All notable changes to NTM (Neural Tone Mapper).
 
+## [1.0.4] — 2026-11-17
+
+### Fixed
+- **RDG 资源顺序错误**：`NTMO::SceneStats` 读取 `NTMO.Local.Lum` 时该纹理还没有生产者，
+  触发 `RenderGraphValidation.cpp:653` 的 ensure。1.0.3 把 stats pass 移出神经分支时
+  落在了金字塔上方而不是下方。RDG 按 `AddPass` 顺序追踪资源版本，读必须先于写的注册
+  顺序严格在先写后读。
+- 该错误导致帧统计缓冲区读到未定义数据，进而污染网络输入的 32 个通道（直方图 + 分块亮度）。
+  修复后画面亮度与 UE 原生偏差从 +0.353 档降到 +0.003 档，平均误差 11.7 → 7.5 / 255 级，
+  逐像素相关 0.934 → 0.9663。
+
+### Changed
+- 渲染验证模式扩展为 `never written to|Ensure condition failed|RenderGraphValidation`
+  等 RDG 校验关键字，并扫描 `Saved/Logs` 下最近的日志。
+
+### Not adopted
+- 用 G0（1/2 分辨率）替代 G1（1/4）作为局部曝光参考。实测最暗 0.1% 像素会提升 2.18 档，
+  但局部校正无时域累积，会引入暗部噪声闪烁，且整体指标无改善（相关 0.9647 vs 0.9663）。
 ## [1.0.3] — 2026-11-15
 
 ### Fixed

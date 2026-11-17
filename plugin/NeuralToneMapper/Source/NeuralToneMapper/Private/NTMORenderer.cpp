@@ -726,29 +726,26 @@ FScreenPassTexture FNTMORenderer::AddPasses(
 		const FGlobalShaderMap* LocalShaderMap = GetGlobalShaderMap(View.GetFeatureLevel());
 		const auto ClampSampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
 
-		// Frame statistics live here rather than inside the neural branch because the
-		// local correction pass needs the mean log2 luminance for its exposure band,
-		// and that pass must also work when the network is disabled.
+		// Frame statistics live outside the neural branch because the local correction
+		// pass needs the mean log2 luminance for its exposure band, and that pass must
+		// also work when the network is disabled.
+		//
+		// The BUFFER is created here; its producing PASS is emitted further down, after
+		// the luminance pyramid. That separation is not cosmetic. RDG tracks resource
+		// versions in AddPass order, so a pass reading Lum[2] must be registered after
+		// the pass writing Lum[2]. Registering the read first binds it to the pre-write
+		// version of a texture created with no initial content, and RDG validation fails:
+		//   Pass NTMO::SceneStats has a read dependency on NTMO.Local.Lum,
+		//   but it was never written to.
+		// That was the NTM 1.0.3 bug: the stats pass was hoisted for the right reason
+		// (the correction pass needs the frame mean) but landed ABOVE the pyramid
+		// instead of below it.
 		const int32 NumStats = 34;	// see NTMO_STAT_* in NTMOFeatures.usf
 		TArray<uint32> ZeroStats;
 		ZeroStats.SetNumZeroed(NumStats);
 		FRDGBufferRef StatsBuffer = CreateStructuredBuffer(
 			GraphBuilder, TEXT("NTMO.Feat.Stats"), sizeof(uint32), NumStats,
 			ZeroStats.GetData(), ZeroStats.Num() * sizeof(uint32), ERDGInitialDataFlags::None);
-
-		{
-			FNTMOSceneStatsCS::FParameters* P = GraphBuilder.AllocParameters<FNTMOSceneStatsCS::FParameters>();
-			P->NTMOStatsLum = Lum[2];
-			P->NTMOStatsLumSampler = ClampSampler;
-			P->RWNTMOStats = GraphBuilder.CreateUAV(StatsBuffer);
-			P->NTMOStatsWidth = (uint32)Sizes[2].X;
-			P->NTMOStatsHeight = (uint32)Sizes[2].Y;
-
-			TShaderMapRef<FNTMOSceneStatsCS> StatsRef(LocalShaderMap);
-			const TShaderRef<FNTMOSceneStatsCS> StatsShader = StatsRef;
-			FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("NTMO::SceneStats"),
-				StatsShader, P, FComputeShaderUtils::GetGroupCount(Sizes[2], 8));
-		}
 
 		// G0: full-res scene colour -> half-res log2 luminance
 		{
@@ -777,6 +774,23 @@ FScreenPassTexture FNTMORenderer::AddPasses(
 			const TShaderRef<FNTMODownsampleCS> Sh = Ref;
 			FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("NTMO::LocalDown%d", i),
 				Sh, P, FComputeShaderUtils::GetGroupCount(Sizes[i], 8));
+		}
+
+		// Frame statistics. Emitted HERE, after G0..G3 have producers, because this pass
+		// reads Lum[2]. See the note at the StatsBuffer declaration for why the order
+		// matters to RDG.
+		{
+			FNTMOSceneStatsCS::FParameters* P = GraphBuilder.AllocParameters<FNTMOSceneStatsCS::FParameters>();
+			P->NTMOStatsLum = Lum[2];
+			P->NTMOStatsLumSampler = ClampSampler;
+			P->RWNTMOStats = GraphBuilder.CreateUAV(StatsBuffer);
+			P->NTMOStatsWidth = (uint32)Sizes[2].X;
+			P->NTMOStatsHeight = (uint32)Sizes[2].Y;
+
+			TShaderMapRef<FNTMOSceneStatsCS> StatsRef(LocalShaderMap);
+			const TShaderRef<FNTMOSceneStatsCS> StatsShader = StatsRef;
+			FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("NTMO::SceneStats"),
+				StatsShader, P, FComputeShaderUtils::GetGroupCount(Sizes[2], 8));
 		}
 
 		// The correction pass is emitted after the network ran; see below.

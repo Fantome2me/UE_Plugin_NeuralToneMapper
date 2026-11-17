@@ -333,7 +333,7 @@ Project Settings → Plugins → Neural Tone Mapper
 
 **方式 A：直接下载 release 里的 zip**
 
-1. 下载 `NTM1.0.3.zip`
+1. 下载 `NTM1.0.4.zip`
 2. 解压，把 `NeuralToneMapper` 文件夹放到：
    ```
    <你的工程>/Plugins/NeuralToneMapper/
@@ -382,17 +382,16 @@ Project Settings → Plugins → Neural Tone Mapper
 
 ## 七、实测数据
 
-### 7.1 与 UE 原生同机位对比（v1.0.3）
+### 7.1 与 UE 原生同机位对比（v1.0.4）
 
 同一编辑器会话、同一相机、同一帧，只切 `r.NTMO.Enable`：
 
 ```
-中调偏差     +0.009 档     ← 几乎完全一致
-阴影偏差     +0.19  档
-高光偏差     -0.14  档
-逐像素相关   0.934
-平均误差     11.7 显示级（of 255）
-削顶         黑 0.019%   白 0.034%
+亮度偏差     +0.003 档     ← 几乎完全一致
+对比度 std 比 0.964
+逐像素相关   0.9663
+平均误差     7.5 显示级（of 255）
+削顶         黑 0.044%   白 0.094%（UE：黑 0.002% 白 0.067%）
 ```
 
 ### 7.2 模型质量（离线验证，100k 样本）
@@ -439,6 +438,7 @@ Project Settings → Plugins → Neural Tone Mapper
 | [1.0.1](docs/RELEASE_NOTES_1.0.1.md) | 首个可用版本：修复致命 PSO 错误、曝光链、HDR/EDID 自适应、同机位 A/B 验证 |
 | [1.0.2](docs/RELEASE_NOTES_1.0.2.md) | 补齐论文的局部 AI：边缘条件输入、48 个学习局部参数、Durand 分解重写局部算子 |
 | [1.0.3](docs/RELEASE_NOTES_1.0.3.md) | 修正「效果反了」：混合域校正、局部曝光 DC 通道、G1 参考、冻结主干训练 |
+| [1.0.4](docs/RELEASE_NOTES_1.0.4.md) | **修复 RDG 资源顺序错误**（帧统计读到未写入纹理），亮度偏差 +0.353 → +0.003 档 |
 
 详细技术说明见 [docs/技术说明.md](docs/技术说明.md)。
 

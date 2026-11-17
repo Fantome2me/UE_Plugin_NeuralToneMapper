@@ -262,10 +262,16 @@ void MainCS_Correction(uint3 DispatchThreadId : SV_DispatchThreadID)
 	// below the frame mean -- and it is what opens up the shadows.
 	// Local-exposure reference is G1 (1/4 res), NOT G3 (1/16).
 	//
-	// At 1/16 resolution a narrow shadow next to a bright surface is already averaged
-	// away: the base reads as bright there, the exposure term sees nothing dark, and the
-	// shadow does not open. Measured with G3: the 0.05..0.15 output band moved by
-	// +0.004 stops. G1 is four times finer and still smooth enough to be halo-free.
+	// At 1/16 a narrow shadow next to a bright surface is already averaged away: the
+	// base reads bright, the exposure term sees nothing dark, and the shadow does not
+	// open. G1 is four times finer and still smooth enough to be halo-free.
+	//
+	// G0 (1/2 res) was measured and NOT adopted. It catches the very deepest pixels
+	// (+2.18 stops on the 0.0..0.05 output band, 0.1% of pixels) while leaving the
+	// 0.05..0.15 band unchanged (+0.0014), and the local correction has no temporal
+	// accumulation, so amplifying the darkest 0.1% by two stops would trade a little
+	// shadow depth for visible shadow-noise shimmer in motion. Overall metrics were
+	// indistinguishable (correlation 0.9647 vs 0.9663).
 	const float Exposure = clamp(G1 - NTMO_MeanLogLum(), -3.0f, 3.0f);
 
 	// NOTE: the s_base term -- SBase * (curve(G3) - curve(G0)) -- is deliberately NOT
