@@ -1,4 +1,4 @@
-# NTM — Neural Tone Mapper（AI 动态色调映射）
+# NTM — Neural Tone Mapper (神经网络动态色调映射）
 
 > 一个 Unreal Engine 5.8 插件：**用一个小神经网络每帧重新决定色调映射曲线**，并根据你的**显示器实际亮度能力**自动调整。
 >
