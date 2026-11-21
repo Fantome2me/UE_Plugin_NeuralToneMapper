@@ -1,0 +1,61 @@
+{
+  "onnx": "NTMO_M_v8.onnx",
+  "lut_size": 33,
+  "note": "Values are LINEAR display, not encoded. Apply sRGB/PQ yourself.",
+  "contexts": {
+    "SDR_100nit": {
+      "source_sample_index": 414,
+      "knots_log2_raw": [
+        -10.4509,
+        -9.2562,
+        -7.0692,
+        -4.4712,
+        -2.1682,
+        -0.7357,
+        -0.0747,
+        0.0002
+      ],
+      "knots_log2_clamped": [
+        -10.4509,
+        -9.2562,
+        -7.0692,
+        -4.4712,
+        -2.1682,
+        -0.7357,
+        -0.0747,
+        0.0
+      ],
+      "curve_peak_nits": 100.0,
+      "peak_nits": 100.0,
+      "min_nits": 0.05,
+      "file": "NTMO_SDR_100nit_33.cube"
+    },
+    "HDR_1000nit": {
+      "source_sample_index": 162,
+      "knots_log2_raw": [
+        -8.6551,
+        -6.3253,
+        -4.145,
+        -1.7811,
+        0.4373,
+        1.9495,
+        2.9574,
+        3.322
+      ],
+      "knots_log2_clamped": [
+        -8.6551,
+        -6.3253,
+        -4.145,
+        -1.7811,
+        0.4373,
+        1.9495,
+        2.9574,
+        3.3219
+      ],
+      "curve_peak_nits": 1000.0,
+      "peak_nits": 1000.0,
+      "min_nits": 0.05,
+      "file": "NTMO_HDR_1000nit_33.cube"
+    }
+  }
+}

@@ -1,0 +1,155 @@
+[train] device=NVIDIA GeForce RTX 5060 Ti
+[train] 2 shards
+[train] train=57000 val=3000
+[train] size=M params=315.6K
+[train] warm-started weights from E:\ConveyanceSpline\UE_ConveyanceSpline\Plugins\NeuralToneMapper\Tools\ntmo_train\_backup\best_v5.pt (its epoch 28, val 0.3437233234445254)
+[train] ep0 step50 lr=6.13e-06 knot_l1=0.1289 1614 samp/s eta=14.9min
+[train] ep0 step100 lr=6.51e-06 knot_l1=0.1257 1694 samp/s eta=14.7min
+[train] ep0 step150 lr=7.14e-06 knot_l1=0.1232 1719 samp/s eta=14.6min
+[train] ep0 step200 lr=8.01e-06 knot_l1=0.1215 1729 samp/s eta=14.5min
+[train] === epoch 0 done | knot_l1=0.1210 val=0.3666 | 0.6 min
+[train] new best 0.3666
+[train] ep1 step250 lr=9.12e-06 knot_l1=0.1132 1763 samp/s eta=14.4min
+[train] ep1 step300 lr=1.04e-05 knot_l1=0.1120 1772 samp/s eta=14.2min
+[train] ep1 step350 lr=1.20e-05 knot_l1=0.1110 1776 samp/s eta=14.1min
+[train] ep1 step400 lr=1.37e-05 knot_l1=0.1105 1774 samp/s eta=14.0min
+[train] === epoch 1 done | knot_l1=0.1097 val=0.3601 | 1.1 min
+[train] new best 0.3601
+[train] ep2 step450 lr=1.57e-05 knot_l1=0.1075 1772 samp/s eta=13.8min
+[train] ep2 step500 lr=1.77e-05 knot_l1=0.1074 1773 samp/s eta=13.7min
+[train] ep2 step550 lr=2.00e-05 knot_l1=0.1069 1776 samp/s eta=13.6min
+[train] ep2 step600 lr=2.23e-05 knot_l1=0.1065 1779 samp/s eta=13.5min
+[train] ep2 step650 lr=2.48e-05 knot_l1=0.1057 1779 samp/s eta=13.4min
+[train] === epoch 2 done | knot_l1=0.1057 val=0.3620 | 1.7 min
+[train] ep3 step700 lr=2.73e-05 knot_l1=0.1037 1773 samp/s eta=13.2min
+[train] ep3 step750 lr=2.99e-05 knot_l1=0.1040 1774 samp/s eta=13.1min
+[train] ep3 step800 lr=3.25e-05 knot_l1=0.1040 1770 samp/s eta=13.0min
+[train] ep3 step850 lr=3.51e-05 knot_l1=0.1039 1770 samp/s eta=12.9min
+[train] === epoch 3 done | knot_l1=0.1043 val=0.4215 | 2.3 min
+[train] ep4 step900 lr=3.77e-05 knot_l1=0.1032 1747 samp/s eta=12.7min
+[train] ep4 step950 lr=4.03e-05 knot_l1=0.1021 1768 samp/s eta=12.6min
+[train] ep4 step1000 lr=4.28e-05 knot_l1=0.1031 1764 samp/s eta=12.5min
+[train] ep4 step1050 lr=4.51e-05 knot_l1=0.1036 1770 samp/s eta=12.3min
+[train] ep4 step1100 lr=4.74e-05 knot_l1=0.1037 1769 samp/s eta=12.2min
+[train] === epoch 4 done | knot_l1=0.1035 val=0.3996 | 2.8 min
+[train] ep5 step1150 lr=4.96e-05 knot_l1=0.1016 1776 samp/s eta=12.1min
+[train] ep5 step1200 lr=5.16e-05 knot_l1=0.1038 1776 samp/s eta=12.0min
+[train] ep5 step1250 lr=5.34e-05 knot_l1=0.1036 1775 samp/s eta=11.8min
+[train] ep5 step1300 lr=5.50e-05 knot_l1=0.1037 1777 samp/s eta=11.7min
+[train] === epoch 5 done | knot_l1=0.1037 val=0.4337 | 3.4 min
+[train] ep6 step1350 lr=5.64e-05 knot_l1=0.1032 1760 samp/s eta=11.6min
+[train] ep6 step1400 lr=5.76e-05 knot_l1=0.1056 1774 samp/s eta=11.5min
+[train] ep6 step1450 lr=5.86e-05 knot_l1=0.1051 1774 samp/s eta=11.3min
+[train] ep6 step1500 lr=5.93e-05 knot_l1=0.1046 1760 samp/s eta=11.2min
+[train] ep6 step1550 lr=5.98e-05 knot_l1=0.1042 1764 samp/s eta=11.1min
+[train] === epoch 6 done | knot_l1=0.1041 val=0.3898 | 3.9 min
+[train] ep7 step1600 lr=6.00e-05 knot_l1=0.1023 1774 samp/s eta=10.9min
+[train] ep7 step1650 lr=6.00e-05 knot_l1=0.1029 1776 samp/s eta=10.8min
+[train] ep7 step1700 lr=6.00e-05 knot_l1=0.1031 1777 samp/s eta=10.7min
+[train] ep7 step1750 lr=6.00e-05 knot_l1=0.1030 1779 samp/s eta=10.6min
+[train] === epoch 7 done | knot_l1=0.1034 val=0.4026 | 4.5 min
+[train] ep8 step1800 lr=5.99e-05 knot_l1=0.1027 1751 samp/s eta=10.4min
+[train] ep8 step1850 lr=5.99e-05 knot_l1=0.1036 1775 samp/s eta=10.3min
+[train] ep8 step1900 lr=5.99e-05 knot_l1=0.1026 1778 samp/s eta=10.2min
+[train] ep8 step1950 lr=5.98e-05 knot_l1=0.1021 1779 samp/s eta=10.1min
+[train] === epoch 8 done | knot_l1=0.1026 val=0.6583 | 5.1 min
+[train] ep9 step2000 lr=5.97e-05 knot_l1=0.0978 1781 samp/s eta=9.9min
+[train] ep9 step2050 lr=5.97e-05 knot_l1=0.1018 1791 samp/s eta=9.8min
+[train] ep9 step2100 lr=5.96e-05 knot_l1=0.1015 1783 samp/s eta=9.7min
+[train] ep9 step2150 lr=5.95e-05 knot_l1=0.1019 1784 samp/s eta=9.6min
+[train] ep9 step2200 lr=5.94e-05 knot_l1=0.1020 1782 samp/s eta=9.4min
+[train] === epoch 9 done | knot_l1=0.1019 val=0.4560 | 5.6 min
+[train] ep10 step2250 lr=5.93e-05 knot_l1=0.1004 1766 samp/s eta=9.3min
+[train] ep10 step2300 lr=5.92e-05 knot_l1=0.1007 1775 samp/s eta=9.2min
+[train] ep10 step2350 lr=5.91e-05 knot_l1=0.1012 1777 samp/s eta=9.1min
+[train] ep10 step2400 lr=5.89e-05 knot_l1=0.1014 1778 samp/s eta=8.9min
+[train] === epoch 10 done | knot_l1=0.1015 val=0.3819 | 6.2 min
+[train] ep11 step2450 lr=5.88e-05 knot_l1=0.1021 1753 samp/s eta=8.8min
+[train] ep11 step2500 lr=5.87e-05 knot_l1=0.1015 1777 samp/s eta=8.7min
+[train] ep11 step2550 lr=5.85e-05 knot_l1=0.1011 1779 samp/s eta=8.6min
+[train] ep11 step2600 lr=5.83e-05 knot_l1=0.1012 1776 samp/s eta=8.4min
+[train] ep11 step2650 lr=5.82e-05 knot_l1=0.1019 1779 samp/s eta=8.3min
+[train] === epoch 11 done | knot_l1=0.1015 val=0.5199 | 6.7 min
+[train] ep12 step2700 lr=5.80e-05 knot_l1=0.1020 1777 samp/s eta=8.2min
+[train] ep12 step2750 lr=5.78e-05 knot_l1=0.0997 1787 samp/s eta=8.0min
+[train] ep12 step2800 lr=5.76e-05 knot_l1=0.1001 1784 samp/s eta=7.9min
+[train] ep12 step2850 lr=5.74e-05 knot_l1=0.0997 1785 samp/s eta=7.8min
+[train] === epoch 12 done | knot_l1=0.0996 val=0.4778 | 7.3 min
+[train] ep13 step2900 lr=5.72e-05 knot_l1=0.1004 1775 samp/s eta=7.7min
+[train] ep13 step2950 lr=5.70e-05 knot_l1=0.1003 1783 samp/s eta=7.5min
+[train] ep13 step3000 lr=5.67e-05 knot_l1=0.0997 1782 samp/s eta=7.4min
+[train] ep13 step3050 lr=5.65e-05 knot_l1=0.0991 1779 samp/s eta=7.3min
+[train] ep13 step3100 lr=5.62e-05 knot_l1=0.0995 1780 samp/s eta=7.2min
+[train] === epoch 13 done | knot_l1=0.0996 val=0.4617 | 7.9 min
+[train] ep14 step3150 lr=5.60e-05 knot_l1=0.0987 1788 samp/s eta=7.0min
+[train] ep14 step3200 lr=5.57e-05 knot_l1=0.0983 1788 samp/s eta=6.9min
+[train] ep14 step3250 lr=5.55e-05 knot_l1=0.0984 1785 samp/s eta=6.8min
+[train] ep14 step3300 lr=5.52e-05 knot_l1=0.0990 1786 samp/s eta=6.7min
+[train] === epoch 14 done | knot_l1=0.0990 val=0.5132 | 8.4 min
+[train] ep15 step3350 lr=5.49e-05 knot_l1=0.0992 1776 samp/s eta=6.5min
+[train] ep15 step3400 lr=5.46e-05 knot_l1=0.0982 1782 samp/s eta=6.4min
+[train] ep15 step3450 lr=5.43e-05 knot_l1=0.0982 1777 samp/s eta=6.3min
+[train] ep15 step3500 lr=5.40e-05 knot_l1=0.0983 1778 samp/s eta=6.2min
+[train] ep15 step3550 lr=5.37e-05 knot_l1=0.0984 1779 samp/s eta=6.0min
+[train] === epoch 15 done | knot_l1=0.0984 val=0.4691 | 9.0 min
+[train] ep16 step3600 lr=5.34e-05 knot_l1=0.0963 1788 samp/s eta=5.9min
+[train] ep16 step3650 lr=5.31e-05 knot_l1=0.0969 1785 samp/s eta=5.8min
+[train] ep16 step3700 lr=5.27e-05 knot_l1=0.0976 1777 samp/s eta=5.7min
+[train] ep16 step3750 lr=5.24e-05 knot_l1=0.0979 1780 samp/s eta=5.5min
+[train] === epoch 16 done | knot_l1=0.0978 val=0.5526 | 9.5 min
+[train] ep17 step3800 lr=5.21e-05 knot_l1=0.0955 1791 samp/s eta=5.4min
+[train] ep17 step3850 lr=5.17e-05 knot_l1=0.0971 1785 samp/s eta=5.3min
+[train] ep17 step3900 lr=5.14e-05 knot_l1=0.0967 1786 samp/s eta=5.2min
+[train] ep17 step3950 lr=5.10e-05 knot_l1=0.0968 1785 samp/s eta=5.0min
+[train] === epoch 17 done | knot_l1=0.0968 val=0.5294 | 10.1 min
+[train] ep18 step4000 lr=5.06e-05 knot_l1=0.0980 1762 samp/s eta=4.9min
+[train] ep18 step4050 lr=5.03e-05 knot_l1=0.0967 1780 samp/s eta=4.8min
+[train] ep18 step4100 lr=4.99e-05 knot_l1=0.0964 1785 samp/s eta=4.7min
+[train] ep18 step4150 lr=4.95e-05 knot_l1=0.0962 1785 samp/s eta=4.5min
+[train] ep18 step4200 lr=4.91e-05 knot_l1=0.0964 1786 samp/s eta=4.4min
+[train] === epoch 18 done | knot_l1=0.0968 val=0.4355 | 10.7 min
+[train] ep19 step4250 lr=4.87e-05 knot_l1=0.0948 1771 samp/s eta=4.3min
+[train] ep19 step4300 lr=4.83e-05 knot_l1=0.0967 1786 samp/s eta=4.1min
+[train] ep19 step4350 lr=4.79e-05 knot_l1=0.0967 1788 samp/s eta=4.0min
+[train] ep19 step4400 lr=4.75e-05 knot_l1=0.0968 1786 samp/s eta=3.9min
+[train] === epoch 19 done | knot_l1=0.0966 val=0.4452 | 11.2 min
+[train] ep20 step4450 lr=4.71e-05 knot_l1=0.0951 1777 samp/s eta=3.8min
+[train] ep20 step4500 lr=4.66e-05 knot_l1=0.0944 1787 samp/s eta=3.6min
+[train] ep20 step4550 lr=4.62e-05 knot_l1=0.0950 1783 samp/s eta=3.5min
+[train] ep20 step4600 lr=4.58e-05 knot_l1=0.0953 1785 samp/s eta=3.4min
+[train] ep20 step4650 lr=4.53e-05 knot_l1=0.0956 1784 samp/s eta=3.3min
+[train] === epoch 20 done | knot_l1=0.0954 val=0.5984 | 11.8 min
+[train] ep21 step4700 lr=4.49e-05 knot_l1=0.0969 1781 samp/s eta=3.1min
+[train] ep21 step4750 lr=4.44e-05 knot_l1=0.0949 1784 samp/s eta=3.0min
+[train] ep21 step4800 lr=4.40e-05 knot_l1=0.0950 1783 samp/s eta=2.9min
+[train] ep21 step4850 lr=4.35e-05 knot_l1=0.0951 1779 samp/s eta=2.8min
+[train] === epoch 21 done | knot_l1=0.0950 val=0.5082 | 12.3 min
+[train] ep22 step4900 lr=4.31e-05 knot_l1=0.0935 1770 samp/s eta=2.6min
+[train] ep22 step4950 lr=4.26e-05 knot_l1=0.0958 1786 samp/s eta=2.5min
+[train] ep22 step5000 lr=4.22e-05 knot_l1=0.0954 1788 samp/s eta=2.4min
+[train] ep22 step5050 lr=4.17e-05 knot_l1=0.0953 1780 samp/s eta=2.3min
+[train] ep22 step5100 lr=4.12e-05 knot_l1=0.0949 1782 samp/s eta=2.1min
+[train] === epoch 22 done | knot_l1=0.0949 val=0.3790 | 12.9 min
+[train] ep23 step5150 lr=4.07e-05 knot_l1=0.0937 1780 samp/s eta=2.0min
+[train] ep23 step5200 lr=4.03e-05 knot_l1=0.0934 1781 samp/s eta=1.9min
+[train] ep23 step5250 lr=3.98e-05 knot_l1=0.0944 1782 samp/s eta=1.8min
+[train] ep23 step5300 lr=3.93e-05 knot_l1=0.0942 1781 samp/s eta=1.6min
+[train] === epoch 23 done | knot_l1=0.0940 val=0.3929 | 13.5 min
+[train] ep24 step5350 lr=3.88e-05 knot_l1=0.0957 1767 samp/s eta=1.5min
+[train] ep24 step5400 lr=3.83e-05 knot_l1=0.0941 1785 samp/s eta=1.4min
+[train] ep24 step5450 lr=3.78e-05 knot_l1=0.0943 1783 samp/s eta=1.3min
+[train] ep24 step5500 lr=3.73e-05 knot_l1=0.0942 1788 samp/s eta=1.1min
+[train] ep24 step5550 lr=3.68e-05 knot_l1=0.0941 1788 samp/s eta=1.0min
+[train] === epoch 24 done | knot_l1=0.0941 val=0.4269 | 14.0 min
+[train] ep25 step5600 lr=3.63e-05 knot_l1=0.0922 1778 samp/s eta=0.9min
+[train] ep25 step5650 lr=3.58e-05 knot_l1=0.0930 1782 samp/s eta=0.7min
+[train] ep25 step5700 lr=3.53e-05 knot_l1=0.0936 1783 samp/s eta=0.6min
+[train] ep25 step5750 lr=3.48e-05 knot_l1=0.0940 1784 samp/s eta=0.5min
+[train] === epoch 25 done | knot_l1=0.0939 val=0.5030 | 14.6 min
+[train] ep26 step5800 lr=3.43e-05 knot_l1=0.0932 1784 samp/s eta=0.4min
+[train] ep26 step5850 lr=3.38e-05 knot_l1=0.0931 1772 samp/s eta=0.2min
+[train] ep26 step5900 lr=3.33e-05 knot_l1=0.0937 1779 samp/s eta=0.1min
+[train] ep26 step5950 lr=3.28e-05 knot_l1=0.0933 1778 samp/s eta=0.0min
+[train] === epoch 26 done | knot_l1=0.0933 val=0.5004 | 15.0 min
+[train] deadline reached
+[train] DONE best_val=0.3601 -> ./run_v6b/best.pt

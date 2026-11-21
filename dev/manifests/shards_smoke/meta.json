@@ -1,0 +1,53 @@
+{
+  "samples": 2000,
+  "c_in": 49,
+  "c_ctx": 45,
+  "c_out": 56,
+  "h": 72,
+  "w": 128,
+  "shards": 2,
+  "teachers": [
+    "clip",
+    "reinhard",
+    "hable",
+    "ue_uncharted",
+    "ue_hp",
+    "ue_legacy",
+    "ue_aces",
+    "analytic"
+  ],
+  "base_teacher_weights": [
+    0.04,
+    0.1,
+    0.2,
+    0.14,
+    0.1,
+    0.08,
+    0.14,
+    0.2
+  ],
+  "scene_teacher_boost": {
+    "lowkey": {
+      "analytic": 2.2,
+      "hable": 1.6,
+      "ue_legendary": 0.0
+    },
+    "highkey": {
+      "ue_aces": 2.2,
+      "ue_hp": 1.6,
+      "clip": 0.3
+    },
+    "specular": {
+      "ue_uncharted": 2.4,
+      "ue_aces": 2.0,
+      "reinhard": 0.4
+    },
+    "marquee": {
+      "analytic": 2.4,
+      "ue_hp": 1.3
+    },
+    "normal": {}
+  },
+  "gen_seconds": 4.57,
+  "samples_per_sec": 437.8
+}

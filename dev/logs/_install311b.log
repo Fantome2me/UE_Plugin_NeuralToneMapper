@@ -1,0 +1,5 @@
+﻿start 2026-11-13T17:39:12.6396782+08:00
+--- uninstall cpu torch ---
+Uninstalling torch-2.15.0:
+  Successfully uninstalled torch-2.15.0
+--- install torch==2.11.0+cu128 from aliyun mirror ---

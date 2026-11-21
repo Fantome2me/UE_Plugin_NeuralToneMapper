@@ -3,8 +3,13 @@
 这个目录放的是**训练侧**的东西：数据生成、模型定义、训练、导出、验证，以及 A/B 对比工具。
 运行时的插件本体在仓库根目录的 `plugin/NeuralToneMapper/`。
 
-> 为什么数据只有一个小样本：完整的训练集是 **100,000 条样本、约 3.7 GB**（每个样本是一张 4×72×128 的 PQ 图 + 45 个上下文标量 + 72 维标签），
-> GitHub 单文件有 100 MB 上限。所以这里只放了 32 条样本供冒烟测试，完整数据用 `gen_dataset.py` **十分钟内可重新生成**（本机 12 进程约 3 分钟）。
+> **想直接复现模型？先看 [`REPRODUCE.md`](REPRODUCE.md)** —— 那是一份从零到可部署 ONNX 的完整步骤，
+> 每步都有可校验的输出与预期指标。
+
+> 为什么数据只有一个小样本：完整的训练集是 **100,000 条样本、约 3.5 GB**（每个样本是一张 4×72×128 的 PQ 图 + 45 个上下文标量 + 72 维标签），
+> 单个分片 1.78 GB，远超 GitHub 的 100 MB 单文件上限。所以这里只放样本与**生成配方**，
+> 完整数据用 `training/gen_dataset.py` **三分钟可重新生成**，而且现在是**确定性**的
+> （同样的命令行 → 同样的字节，进程数只影响速度）。
 
 ---
 
@@ -12,16 +17,21 @@
 
 ```
 dev/
+├─ REPRODUCE.md         ★ 从零复现：环境 → 数据 → 训练 → 验证 → 导出
 ├─ training/            训练管线
 │  ├─ ntmo_pack.py      输入/输出契约（C_IN=49, C_OUT=72）+ 打包
 │  ├─ ntmo_model.py     网络定义（曲线头 + 局部参数头 + 放置矩阵）
 │  ├─ ntmo_synth.py     合成 HDR 场景 + 显示器上下文采样
 │  ├─ ntmo_teachers.py  教师曲线（ACES / Uncharted / Hable / Reinhard / 解析策略…）
 │  ├─ ntmo_local.py     局部拉普拉斯参数标签（Durand 参考 + 4 通道最小二乘拟合）
-│  ├─ gen_dataset.py    并行生成数据分片
+│  ├─ gen_dataset.py    并行生成数据分片（确定性）
 │  ├─ train.py          训练（支持 --init-from 热启动、--freeze-backbone）
 │  ├─ export_onnx.py    导出 ONNX + 数值一致性检查 + 单调性检查
 │  └─ _verify.py        离线评估（L1 / 离散度 / 单调性 / 相关性 / 局部参数误差）
+├─ checkpoints/         ★ 三个已训练权重（v6b / v7b / v8b，共 8.8 MB）
+├─ environment/         ★ 训练环境快照（requirements.txt + 硬件/版本记录）
+├─ logs/                ★ 每次训练的完整日志（含失败与调参过程）
+├─ manifests/           ★ 五个数据集的生成参数（meta.json）+ 数据集说明
 ├─ data/
 │  └─ sample_shard.npz  32 条样本（279 KB），格式与正式分片完全相同
 └─ ab/
@@ -30,14 +40,25 @@ dev/
    └─ _ab_compare_same_session.py 定量比较（逐亮度带、削顶率、相关性）
 ```
 
+### 新增的三样东西是干什么用的
+
+| 目录 | 内容 | 为什么需要 |
+|---|---|---|
+| `checkpoints/` | `best_v6b.pt` / `best_v7b.pt` / `best_v8b.pt` | 有它们就能**跳过训练直接导出 ONNX**；也可以拿来热启动继续微调 |
+| `environment/` | `pip freeze` 全量 + Python/CUDA/torch/显卡/驱动版本 | 训练环境不可移植（venv 4.5 GB），可移植的是**精确的版本清单** |
+| `logs/` | `_v6_train.log` … `_v8b_train.log`，共 10 份 | 复现失败时对照"正常应该长什么样"；里面也有失败尝试的记录 |
+| `manifests/` | 每个数据集一份 `meta.json` + `SHARDS.md` | 数据不在仓库里，**生成参数**必须在，否则重建出来的不是同一份数据 |
+
 ---
 
 ## 环境
 
 ```bash
-python -m venv .venv
-.venv/Scripts/pip install torch numpy pillow onnx onnxruntime
+python -m venv .venv311
+.venv311/Scripts/python -m pip install -r environment/requirements.txt
 ```
+
+精确版本见 [`environment/ENVIRONMENT.md`](environment/ENVIRONMENT.md)（Python 3.11.9 / torch 2.11.0+cu128 / CUDA 12.8）。
 
 PyTorch 版本取决于显卡：Blackwell（RTX 50 系）需要 cu128+，Hopper/Ada 用 cu124 即可。
 

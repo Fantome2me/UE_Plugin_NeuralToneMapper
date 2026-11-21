@@ -203,11 +203,20 @@ def main():
 
     per_image = max(1, args.ctx)
     n_images_total = int(np.ceil(args.samples / per_image))
-    jobs_per_worker = max(1, n_images_total // max(args.workers, 1))
+    # Job partition must NOT depend on --workers.
+    #
+    # It used to be n_images_total // workers, which meant the same command line produced
+    # different data on a 4-core and on a 16-core machine: the partition changed, so the
+    # per-job seeds changed, so the samples changed. That silently breaks "clone the repo
+    # and regenerate the dataset" -- you get a different dataset than the one the shipped
+    # checkpoints were trained on. Partition into a fixed number of jobs instead, and let
+    # the worker count only affect how fast they are executed.
+    JOBS_TARGET = 64
+    jobs_per_job = max(1, int(np.ceil(n_images_total / JOBS_TARGET)))
 
     jobs, remaining, i, seed0 = [], n_images_total, 0, 12345
     while remaining > 0:
-        take = min(jobs_per_worker, remaining)
+        take = min(jobs_per_job, remaining)
         jobs.append((seed0 + i * 7919, take, per_image))
         remaining -= take
         i += 1
@@ -235,7 +244,11 @@ def main():
 
     seen = 0
     with Pool(args.workers) as pool:
-        for res in pool.imap_unordered(_worker, jobs):
+        # imap (ordered), not imap_unordered: the order in which results are appended
+        # decides the sample order inside each shard file, and therefore which samples
+        # land in the validation split. Unordered collection made two runs of the same
+        # command produce differently-ordered shards.
+        for res in pool.imap(_worker, jobs):
             if res is None:
                 continue
             rgb, ctx, y = res

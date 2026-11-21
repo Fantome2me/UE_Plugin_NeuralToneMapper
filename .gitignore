@@ -12,18 +12,28 @@ DerivedDataCache/
 *.VC.db
 *.VC.opendb
 
-# Training toolkit (large, not part of the plugin runtime)
+# Training toolkit -- the bulky machine-specific parts.
+# The *content* that makes reproduction possible lives under dev/ and IS tracked.
 Tools/
 .venv*/
 _wheels/
-shards*/
-run_*/
 *.pt
 *.log
+
+# ...except the checkpoints and training logs, which are the whole point of dev/.
+# Without these negations the two rules above silently drop the most valuable files.
+!dev/checkpoints/*.pt
+!dev/logs/*.log
+
+# Python
+__pycache__/
+*.pyc
 
 # OS
 Thumbs.db
 .DS_Store
 
-# Version zips are Release assets, uploaded by hand - not tracked in git
+# Version zips and dataset shards are Release assets, not tracked in git
 dist/*.zip
+dev/shards*/
+dev/shards*_shard_*.npz
