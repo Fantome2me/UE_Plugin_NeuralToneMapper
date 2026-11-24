@@ -224,6 +224,66 @@ public:
 	UPROPERTY(config, EditAnywhere, Category = "Look", meta = (DisplayName = "Match Unreal Hue Behaviour"))
 	bool bMatchUnrealHueBehavior = true;
 
+	// -----------------------------------------------------------------------
+	// Curve reshape (1.0.7)
+	//
+	// The network's curve is internally consistent but sits low with a flat shoulder.
+	// Measured on the night-sky project (8 knots, panel peak 100 nit):
+	//
+	//     input        predicted    Unreal ACES
+	//     18% grey     0.152        0.267        (-0.81 stops)
+	//     100 nit      0.584        0.804
+	//     peak         90 nit       100 nit      (10% of the panel unused)
+	//     shoulder     0.03 slope    -
+	//
+	// Two monotone remaps in output space, applied at bake time in the LUT:
+	//   MidGreyAnchorStops  lifts a bell centred on the curve's own 18% grey
+	//   PeakFill            stretches the shoulder toward the real panel peak
+	//
+	// Defaults were chosen, not guessed: sweeping mid-lift x width x peak-fill and
+	// picking the combination that puts 18% grey and 100 nit onto ACES while still
+	// using 97.5% of the panel peak. Measured result of the defaults below:
+	//
+	//     input        reshaped    ACES
+	//     18% grey     0.240       0.267
+	//     100 nit      0.802       0.804
+	//     400 nit      0.961       0.973
+	//     peak         97.5 nit    -
+	// -----------------------------------------------------------------------
+
+	/** Mid-grey lift in stops. 0 disables the lift (pre-1.0.7 behaviour). */
+	UPROPERTY(config, EditAnywhere, Category = "Look|Curve", meta = (ClampMin = "0.0", ClampMax = "2.0", DisplayName = "Mid-Grey Anchor (stops)"))
+	float MidGreyAnchorStops = 0.45f;
+
+	/** Width of the mid-grey lift in stops. Narrower keeps the effect off the shadows. */
+	UPROPERTY(config, EditAnywhere, Category = "Look|Curve", meta = (ClampMin = "0.25", ClampMax = "6.0", DisplayName = "Mid-Grey Anchor Width"))
+	float MidGreyAnchorWidth = 1.6f;
+
+	/** How much of the remaining gap to the panel peak the shoulder closes (0..1). */
+	UPROPERTY(config, EditAnywhere, Category = "Look|Curve", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Peak Fill"))
+	float PeakFill = 0.70f;
+
+	/**
+	 * Chroma compensation: give colour back exactly where luminance was compressed.
+	 *
+	 * Losing lightness costs colourfulness (Hunt effect); recovering some chroma where
+	 * the display still has room is what keeps a compressed image looking deep instead
+	 * of washed out. Unlike a saturation slider this does nothing at the peak, so it
+	 * cannot inflate highlights that are already clipped.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Look|Curve", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Chroma Compensation"))
+	float ChromaCompensation = 0.25f;
+
+	/**
+	 * Multiplier on the learned local shadow lift.
+	 *
+	 * The lift was already signed correctly (regions below the local mean are raised)
+	 * but measured only ~0.1 stops at the default s_low, which is invisible. 3x makes a
+	 * region 2 stops below the mean open by ~0.6 stops without touching global exposure.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Local Operator", meta = (ClampMin = "1.0", ClampMax = "8.0", DisplayName = "Shadow Boost"))
+	float ShadowBoost = 3.0f;
+
 	/** Resolution of the baked tone mapping LUT. 33 matches the paper/industry default. */
 	UPROPERTY(config, EditAnywhere, Category = "Quality", meta = (ClampMin = "16", ClampMax = "64", DisplayName = "LUT Size"))
 	int32 LUTSize = 33;

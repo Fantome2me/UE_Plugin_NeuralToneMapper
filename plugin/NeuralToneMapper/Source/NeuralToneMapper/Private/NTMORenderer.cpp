@@ -187,6 +187,10 @@ public:
 		SHADER_PARAMETER(FMatrix44f, NTMOToAP1)
 		SHADER_PARAMETER(FMatrix44f, NTMOFromAP1)
 		SHADER_PARAMETER(FMatrix44f, NTMOExpandMat)
+		SHADER_PARAMETER(float, NTMOMidGreyStops)
+		SHADER_PARAMETER(float, NTMOMidGreyWidth)
+		SHADER_PARAMETER(float, NTMOPeakFill)
+		SHADER_PARAMETER(float, NTMOChromaComp)
 		SHADER_PARAMETER(float, NTMOUnrealHueBehavior)
 		SHADER_PARAMETER(float, NTMOBlueCorrection)
 		SHADER_PARAMETER(FMatrix44f, NTMOBlueCorrectAP1)
@@ -341,6 +345,7 @@ public:
 		SHADER_PARAMETER(float, NTMOStrengthScale)
 		SHADER_PARAMETER(float, NTMODetailMix)
 		SHADER_PARAMETER(float, NTMOExposureScale)
+		SHADER_PARAMETER(float, NTMOShadowBoost)
 		SHADER_PARAMETER(float, NTMOClampStops)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float2>, RWNTMOCorrection)
 	END_SHADER_PARAMETER_STRUCT()
@@ -756,6 +761,17 @@ FScreenPassTexture FNTMORenderer::AddPasses(
 		PassParameters->NTMOMaxNits = Ctx.MaxLuminanceNits;
 		PassParameters->NTMOMaxFullFrameNits = Ctx.MaxFullFrameLuminanceNits;
 		PassParameters->NTMOPaperWhiteNits = Ctx.PaperWhiteNits;
+
+		// ---- Curve reshape (1.0.7) ----
+		// The predicted curve sits ~0.8 stops below ACES at mid-grey and leaves 10% of
+		// the panel peak unused. These reshape it in output space; see NTMOColorGrading.ush.
+		{
+			const UNTMOSettings* Look = GetDefault<UNTMOSettings>();
+			PassParameters->NTMOMidGreyStops = FMath::Clamp(Look->MidGreyAnchorStops, 0.0f, 2.0f);
+			PassParameters->NTMOMidGreyWidth = FMath::Clamp(Look->MidGreyAnchorWidth, 0.25f, 6.0f);
+			PassParameters->NTMOPeakFill = FMath::Clamp(Look->PeakFill, 0.0f, 1.0f);
+			PassParameters->NTMOChromaComp = FMath::Clamp(Look->ChromaCompensation, 0.0f, 1.0f);
+		}
 
 		// ---- Unreal colour grading ----
 		// The values come straight from the view's post process settings, so whatever the
@@ -1199,6 +1215,48 @@ FScreenPassTexture FNTMORenderer::AddPasses(
 								&& Data[1] > Data[0]), LogTemp, Error,
 								TEXT("[NTMO] Neural knots are NOT monotonically increasing - the LUT "
 									"would invert contrast. This indicates garbage network output."));
+							// Effective-curve report (1.0.7). The knots above are what the NETWORK
+							// predicted; what reaches the display is those knots after
+							// NTMO_ReshapeCurve. Logging only the raw knots made "the picture is too
+							// dark" impossible to tell apart from "the network predicted a dark
+							// curve" without reading the shader, so print the same reference points
+							// the regression is stated against, before and after the reshape.
+							{
+								const UNTMOSettings* Look = GetDefault<UNTMOSettings>();
+								const float LogPeak = FMath::Log2(FMath::Max((float)Ctx.MaxLuminanceNits * 0.01f, 1.0e-4f));
+								const float LogFloor = FMath::Log2(FMath::Max((float)Ctx.MinLuminanceNits * 0.01f, 1.0e-6f));
+
+								auto EvalCurve = [](float X, const float* V)
+								{
+									const float T = FMath::Clamp((X + 10.0f) / 2.0f, 0.0f, 7.0f);
+									const int32 I = FMath::Min((int32)T, 6);
+									return FMath::Lerp(V[I], V[I + 1], T - (float)I);
+								};
+
+								float Raw[8], Shaped[8];
+								for (int32 k = 0; k < 8; ++k) { Raw[k] = Data[k]; Shaped[k] = Data[k]; }
+
+								const float MidOut = EvalCurve(FMath::Log2(0.18f), Raw);
+								const float Width = FMath::Max(Look->MidGreyAnchorWidth, 0.25f);
+								for (int32 k = 0; k < 8; ++k)
+								{
+									float O = Shaped[k];
+									const float W = FMath::Exp(-(O - MidOut) * (O - MidOut) / (Width * Width));
+									O += Look->MidGreyAnchorStops * W;
+									const float S = FMath::Clamp((O - MidOut) / FMath::Max(LogPeak - MidOut, 1.0e-3f), 0.0f, 1.0f);
+									O += (LogPeak - O) * Look->PeakFill * S;
+									Shaped[k] = FMath::Clamp(O, LogFloor, LogPeak);
+								}
+								for (int32 k = 1; k < 8; ++k) { Shaped[k] = FMath::Max(Shaped[k], Shaped[k - 1]); }
+
+								const float XMid = FMath::Log2(0.18f);
+								UE_LOG(LogTemp, Warning,
+									TEXT("[NTMO] Effective curve | 18%% grey %.3f -> %.3f (ACES 0.267) | 100 nit %.3f -> %.3f (ACES 0.804) | peak %.1f -> %.1f nit (panel %.0f)"),
+									FMath::Pow(2.0f, EvalCurve(XMid, Raw)), FMath::Pow(2.0f, EvalCurve(XMid, Shaped)),
+									FMath::Pow(2.0f, EvalCurve(0.0f, Raw)), FMath::Pow(2.0f, EvalCurve(0.0f, Shaped)),
+									FMath::Pow(2.0f, Raw[7]) * 100.0f, FMath::Pow(2.0f, Shaped[7]) * 100.0f,
+									(float)Ctx.MaxLuminanceNits);
+							}
 							KnotsReadback->Unlock();
 							KnotsReadback.Reset();
 							CVarNTMODumpKnots->Set(0, ECVF_SetByCode);
@@ -1282,6 +1340,7 @@ FScreenPassTexture FNTMORenderer::AddPasses(
 			P->NTMOStrengthScale = 1.5f;	// matches S_MAX in ntmo_local.py
 			P->NTMODetailMix = FMath::Clamp(LocalSettings->LocalDetailMix, 0.0f, 1.0f);
 			P->NTMOExposureScale = FMath::Clamp(LocalSettings->LocalExposureScale, 0.0f, 2.0f);
+	P->NTMOShadowBoost = FMath::Clamp(LocalSettings->ShadowBoost, 1.0f, 8.0f);
 			P->NTMOClampStops = FMath::Max(0.25f, LocalSettings->LocalGainClampStops);
 			P->RWNTMOCorrection = GraphBuilder.CreateUAV(FRDGTextureUAVDesc(CorrectionTex));
 

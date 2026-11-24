@@ -215,3 +215,84 @@ float3 NTMO_ToneMapPerChannelAP1(
 
 	return max(OutColor + BlackLift, 0.0f);
 }
+// ---------------------------------------------------------------------------
+// Curve reshape - 1.0.7
+// ---------------------------------------------------------------------------
+// The predicted curve is internally consistent but sits low with a flat top. Measured
+// on the night-sky project: 18% grey -> 0.152 where Unreal's ACES puts it at 0.267
+// (-0.81 stops), 100 nit -> 0.584 where ACES puts it at 0.804, peak at 90 nit on a
+// 100 nit panel, shoulder slope 0.03 (400 nit and 1000 nit landed on the same value).
+// That is the reported symptom: richer colour, darker picture, no highlight range.
+//
+// Two monotone remaps, both functions of the OUTPUT value, neither touching the black
+// end and neither requiring a different model:
+//   1. a bell lift centred on the curve's own 18% grey output;
+//   2. a shoulder fill that stretches everything above that toward the real peak.
+void NTMO_ReshapeCurve(
+	inout FNTMOKnots K,
+	float MidGreyStops,
+	float MidGreyWidth,
+	float PeakFill,
+	float LogPeak,
+	float LogFloor)
+{
+	if (MidGreyStops == 0.0f && PeakFill <= 0.0f)
+	{
+		return;
+	}
+
+	float V[8] = { K.K01.x, K.K01.y, K.K01.z, K.K01.w,
+	               K.K23.x, K.K23.y, K.K23.z, K.K23.w };
+
+	const float MidOut = NTMO_EvalCurveLog2(log2(0.18f), K);
+	const float Width = max(MidGreyWidth, 0.25f);
+
+	float Out[8];
+	[unroll]
+	for (int i = 0; i < 8; ++i)
+	{
+		float O = V[i];
+
+		const float W = exp(-(O - MidOut) * (O - MidOut) / (Width * Width));
+		O += MidGreyStops * W;
+
+		const float S = saturate((O - MidOut) / max(LogPeak - MidOut, 1.0e-3f));
+		O += (LogPeak - O) * PeakFill * S;
+
+		Out[i] = clamp(O, LogFloor, LogPeak);
+	}
+
+	[unroll]
+	for (int j = 1; j < 8; ++j)
+	{
+		Out[j] = max(Out[j], Out[j - 1]);
+	}
+
+	K.K01 = float4(Out[0], Out[1], Out[2], Out[3]);
+	K.K23 = float4(Out[4], Out[5], Out[6], Out[7]);
+}
+
+// ---------------------------------------------------------------------------
+// Chroma compensation - trade lightness for colour instead of losing both.
+// ---------------------------------------------------------------------------
+// Compressing luminance costs colourfulness: in a perceptually uniform space the chroma
+// has to rise as lightness falls for a colour to keep looking as colourful (the Hunt
+// effect; HDR work such as Shen et al., "Scaling Lightness and Chroma for Highlight
+// Stimuli in HDR Scenes", treats the two as a coupled pair, not as luminance plus a
+// fixed saturation).
+//
+// So give chroma back where the display has room: more toward black, nothing at the
+// peak. That is what makes a compressed image read as deep instead of washed out, and
+// it is deliberately NOT a global saturation slider, which would also inflate the
+// highlights that already sit at the peak.
+float3 NTMO_ChromaCompensate(float3 Color, float Amount, float PeakLinear)
+{
+	if (Amount <= 0.0f)
+	{
+		return Color;
+	}
+
+	const float Lum = dot(Color, float3(0.2126f, 0.7152f, 0.0722f));
+	const float Room = saturate(1.0f - Lum / max(PeakLinear, 1.0e-4f));
+	return max(Lum + (Color - Lum) * (1.0f + Amount * Room), 0.0f);
+}

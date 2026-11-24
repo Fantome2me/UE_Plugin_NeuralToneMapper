@@ -2,6 +2,56 @@
 
 All notable changes to NTM (Neural Tone Mapper).
 
+## [1.0.7] — 2026-11-24
+
+### Fixed — 三个可量化的缺陷
+在夜空工程实测，网络预测的曲线与 UE 的 ACES 逐点对比：
+
+| 输入 | 预测曲线 | ACES | 差 |
+|---|---|---|---|
+| 18% 中灰 | 0.152 | 0.267 | **暗 0.81 档** |
+| 100 nit | 0.584 | 0.804 | 暗 0.46 档 |
+| 峰值 | 91 nit / 面板 100 | 100 | **10% 范围没用上** |
+| 肩部斜率 (+2..+4) | **0.03** | — | 400 与 1000 nit 落到同一个值 |
+
+于是"颜色变丰富但整体压暗、亮部没有高亮度、暗部没有细节"三件事同时成立。
+
+- **曲线重塑**（`NTMO_ReshapeCurve`）：两个单调重映射，都只作用在**输出**值上，不碰黑端、不换模型
+  - 以曲线自身 18% 中灰为心的**高斯抬升**（`MidGreyAnchorStops`）
+  - 向真实面板峰值**填充肩部**（`PeakFill`）
+  - 默认值不是拍脑袋：扫描 mid×width×peak 三种参数，取"18% 与 100 nit 同时落到 ACES 上、
+    且仍用掉 97.5% 峰值"的组合（0.45 / 1.6 / 0.70）
+- **阴影抬升增益**（`ShadowBoost`，默认 3×）：原实现的符号本来就是对的
+  （`max(0,-Exposure)` 表示"比局部均值暗的区域被抬高"），但实测只有
+  `1 档 × s_low 0.2 × scale 0.5 = 0.1 档`，等于没有。3× 后暗区 2 档偏差可开约 0.6 档。
+- **色度补偿**（`ChromaCompensation`，默认 0.25）：亮度被压缩就要把色度补回来，
+  这是 Hunt 效应的一面（HDR 高光研究里亮度与色度本就是成对处理，见 Shen 等
+  "Scaling Lightness and Chroma for Highlight Stimuli in HDR Scenes"）。
+  只在"显示还有余量"的地方补，峰值处为 0，因此**不会**把已经到峰值的高光再吹亮。
+
+### 实机验证（不是估算）
+新增一次性日志，把网络原始曲线与重塑后曲线在三个参考点上同时打出来：
+
+```
+[NTMO] Effective curve | 18% grey 0.155 -> 0.243 (ACES 0.267)
+                        | 100 nit  0.593 -> 0.809 (ACES 0.804)
+                        | peak     91.0  -> 97.7 nit (panel 100)
+```
+
+18% 从暗 0.81 档收敛到暗 0.14 档，100 nit 与 ACES 相差 0.01 档，峰值用掉 97.7%。
+
+### Added
+- 设置项：`Mid-Grey Anchor (stops)`、`Mid-Grey Anchor Width`、`Peak Fill`、
+  `Chroma Compensation`（以上在 Look|Curve）、`Shadow Boost`（Local Operator）
+- `NTMO_ReshapeCurve` / `NTMO_ChromaCompensate`（`NTMOColorGrading.ush`）
+
+### Changed
+- `NTMOLocal.usf` 的 `ShadowLift` 乘上 `NTMOShadowBoost`
+
+### 未做的部分
+- 没有改成真正在感知均匀空间（ICtCp / JzAzBz）里做色调映射。当前仍是
+  "曲线 + 输出域重映射 + 色度补偿"，成本极低但只是那条思路的近似。
+  彻底的版本要把 LUT 的索引域也换成感知空间，属于下一轮的结构改动。
 ## [1.0.6] — 2026-11-24
 
 ### Added — 色相行为对齐

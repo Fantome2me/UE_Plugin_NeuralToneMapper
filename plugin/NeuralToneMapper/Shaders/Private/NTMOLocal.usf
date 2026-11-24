@@ -174,6 +174,12 @@ float NTMOStrengthScale;
  */
 float NTMODetailMix;
 float NTMOExposureScale;
+
+// 1.0.7: the shadow lift existed but was ineffective. Measured on the night-sky scene:
+// s_low ~0.2, exposure scale 0.5, a region 1 stop below the mean gave
+// 1 * 0.2 * 0.5 = 0.1 stops of lift - invisible. This multiplies it into a range where
+// dark regions actually open up (2 stops below the mean -> ~0.6 stops at 3x).
+float NTMOShadowBoost;
 /** Hard safety clamp on the correction, in stops. */
 float NTMOClampStops;
 
@@ -295,7 +301,7 @@ void MainCS_Correction(uint3 DispatchThreadId : SV_DispatchThreadID)
 	// Restricting it to below-mean regions (max(0, -Exposure)) makes it do what the name
 	// promises: open the shadows and leave the highlights to the tone curve, whose job
 	// compressing those already is.
-	const float ShadowLift = max(0.0f, -Exposure) * max(0.0f, -SLow) * NTMOExposureScale;
+	const float ShadowLift = max(0.0f, -Exposure) * max(0.0f, -SLow) * NTMOExposureScale * NTMOShadowBoost;
 
 	const float Corr = NTMODetailMix * Detail + ShadowLift;
 

@@ -73,6 +73,12 @@ float4 NTMOColorGainHighlights;
 float4 NTMOColorOffsetHighlights;
 
 // Unreal-compatible hue behaviour (per-channel curve + blue correction around it).
+// Curve reshape (1.0.7): anchor mid-grey, fill the shoulder.
+float NTMOMidGreyStops;
+float NTMOMidGreyWidth;
+float NTMOPeakFill;
+float NTMOChromaComp;
+
 float NTMOUnrealHueBehavior;
 float NTMOBlueCorrection;
 float4x4 NTMOBlueCorrectAP1;
@@ -128,6 +134,10 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	const float LogFloorClamp = log2(max(NTMOMinNits * 0.01f, 1.0e-6f)) + 0.01f;
 	K.K01 = clamp(K.K01, LogFloorClamp, LogPeakClamp);
 	K.K23 = clamp(K.K23, LogFloorClamp, LogPeakClamp);
+
+	// Anchor the curve to Unreal's mid-grey and fill the shoulder (1.0.7).
+	NTMO_ReshapeCurve(K, NTMOMidGreyStops, NTMOMidGreyWidth, NTMOPeakFill,
+		LogPeakClamp, LogFloorClamp);
 
 	const float3 SceneLinearRaw = SampleGridLinear(DispatchThreadId, (uint)NTMOLutSize) * NTMOExposure;
 
@@ -196,5 +206,9 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	// exp2() in display space. Multiplying an already PQ-encoded value would be wrong
 	// (PQ is not linear in luminance), so the transfer function moved to the tonemap
 	// shader, after the correction. One pow per pixel is cheap; a wrong gamma is not.
-	RWOutputLUT[DispatchThreadId] = float4(max(Mapped, 0.0f), 1.0f);
+	// Give chroma back where luminance was compressed.
+	const float3 FinalColor = NTMO_ChromaCompensate(Mapped, NTMOChromaComp,
+		max(NTMOMaxNits * 0.01f, 1.0e-4f));
+
+	RWOutputLUT[DispatchThreadId] = float4(max(FinalColor, 0.0f), 1.0f);
 }
