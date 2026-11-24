@@ -205,6 +205,25 @@ public:
 	UPROPERTY(config, EditAnywhere, Category = "Look", meta = (DisplayName = "Match Unreal Colour Grading"))
 	bool bMatchUnrealColorGrading = true;
 
+	/**
+	 * Match Unreal's HUE behaviour as well as its grading.
+	 *
+	 * Unreal's FilmToneMap compresses R, G and B independently, which is what makes
+	 * ACES-derived curves shift hue on bright saturated colours (the "notorious six"),
+	 * and what makes an Unreal sky read blue-violet. The plugin's default operator maps
+	 * max(RGB) and scales the rest by one ratio, so it preserves hue by construction.
+	 *
+	 * Those are two different pictures, not two ways to compute one. With this ON the
+	 * learned curve is applied per channel in AP1, wrapped in Unreal's blue correction
+	 * exactly as CombineLUTs does, so the hue drift matches Unreal's. With it OFF the
+	 * image keeps its hue exactly and looks cleaner but not Unreal-like.
+	 *
+	 * Reported as "the colours are still off" against a reference image: this is the
+	 * switch that changes it.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Look", meta = (DisplayName = "Match Unreal Hue Behaviour"))
+	bool bMatchUnrealHueBehavior = true;
+
 	/** Resolution of the baked tone mapping LUT. 33 matches the paper/industry default. */
 	UPROPERTY(config, EditAnywhere, Category = "Quality", meta = (ClampMin = "16", ClampMax = "64", DisplayName = "LUT Size"))
 	int32 LUTSize = 33;

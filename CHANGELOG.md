@@ -2,6 +2,30 @@
 
 All notable changes to NTM (Neural Tone Mapper).
 
+## [1.0.6] — 2026-11-24
+
+### Added — 色相行为对齐
+- **`Match Unreal Hue Behaviour`（默认开）**：我们的曲线原本是 MaxRGB 形式（只映射最大通道、
+  其余等比缩放），**构造上就保色相**；UE 的 `FilmToneMap` 是**逐通道**压缩 R/G/B，
+  这正是 ACES 系曲线在高饱和亮色上"移色相"（notorious six）的原因。
+  两者是**两张不同的图**，不是同一种算法。
+- 新增 `NTMO_ToneMapPerChannelAP1`：同一条学习曲线，改为在 AP1 里逐通道施加，
+  并按 `CombineLUTs` 的写法包上蓝色修正 —— `正变换 → 曲线 → 逆变换`。
+- BlueCorrection 取自 `View.FinalPostProcessSettings.BlueCorrection`（引擎默认 0.6），
+  矩阵为 `mul(AP0_2_AP1, mul(BlueCorrect, AP1_2_AP0))`。
+- 控制台变量 `r.NTMO.Hue`：`-1` 跟随设置、`0` 用 MaxRGB（保色相，1.0.5 及以前的行为）、
+  `1` 用逐通道 + 蓝修正。
+
+### 说明
+- 关掉它得到的是"更干净但不像 UE"的画面（色相严格不偏），打开才是 UE 的画面。
+  如果目标是复刻 UE，这项要保持开。
+- 蓝色修正本身量级很小（默认强度下对色相 −0.5°～−3.5°），
+  **真正起作用的是逐通道曲线**：它才是高光色相走向与 UE 一致的原因。
+
+### 未验证的部分
+- 着色器编译通过、插件运行正常，但**没有给出色相偏差的量化改进**：
+  这个工程的动态天空 + 自动曝光让截图 A/B 的噪声（亮度漂移 25%）大于要测的效应。
+  请用 `r.NTMO.Hue 0/1` 直接切换判断。
 ## [1.0.5] — 2026-11-24
 
 ### Fixed

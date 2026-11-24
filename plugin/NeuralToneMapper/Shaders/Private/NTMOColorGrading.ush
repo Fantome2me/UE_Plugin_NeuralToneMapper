@@ -146,3 +146,72 @@ float3 NTMO_ExpandGamut(float3 ColorAP1, float ExpandGamut, float3x3 ExpandMat)
 	float3 ColorExpand = mul(ExpandMat, ColorAP1);
 	return lerp(ColorAP1, ColorExpand, ExpandAmount);
 }
+
+// ---------------------------------------------------------------------------
+// Per-channel tone curve, in AP1 - Unreal's own hue behaviour.
+// ---------------------------------------------------------------------------
+// Unreal's FilmToneMap compresses R, G and B independently. That is precisely why
+// ACES-derived curves shift hue on bright saturated colours (the "notorious six"), and
+// it is also why Unreal's sky reads blue-violet where a hue-preserving operator reads
+// cyan. The plugin's default MaxRGB operator deliberately preserves hue, which is a
+// different look - not the same look computed differently.
+//
+// This is the Unreal-compatible alternative: the same learned curve, applied per
+// channel, so the hue drift matches Unreal's instead of being suppressed.
+//
+// The curve itself is unchanged (same knots, same Fritsch-Carlson evaluation); only the
+// formulation differs. MaxRGB maps max(RGB) and scales the rest by one ratio; this maps
+// each channel on its own.
+float3 NTMO_ToneMapPerChannelAP1(
+	float3 ColorAP1,
+	FNTMOKnots K,
+	float HighlightDesat,
+	float BlackLift,
+	float Saturation,
+	float GamutCompress,
+	float MaxNits,
+	float MinNits)
+{
+	const float PeakLinear = max(MaxNits * 0.01f, 1.0e-4f);
+	const float FloorLinear = MinNits * 0.01f;
+	const float LogFloor = log2(max(FloorLinear, 1.0e-8f));
+	const float LogPeak = log2(PeakLinear);
+
+	// Per channel: log2 -> curve -> exp2, then the physical clamp. Values at or below
+	// the floor stay at the floor rather than going to log2(0).
+	float3 OutColor;
+	[unroll]
+	for (int c = 0; c < 3; ++c)
+	{
+		const float C = ColorAP1[c];
+		if (C <= 1.0e-8f)
+		{
+			OutColor[c] = BlackLift;
+			continue;
+		}
+		const float OutLog2 = clamp(NTMO_EvalCurveLog2(log2(C), K), LogFloor, LogPeak);
+		OutColor[c] = clamp(exp2(OutLog2), FloorLinear, PeakLinear);
+	}
+
+	const float Lum = dot(OutColor, NTMO_AP1_RGB2Y);
+
+	// Same highlight desaturation ramp as the MaxRGB path so the two stay comparable.
+	const float PeakNits = max(MaxNits, 1.0f);
+	const float DesatStart = 0.60f * PeakNits;
+	const float DesatSpan = max(PeakNits - DesatStart, 1.0f);
+	const float PeakOut = max(OutColor.r, max(OutColor.g, OutColor.b));
+	const float DesatAmount = saturate(((PeakOut * 100.0f) - DesatStart) / DesatSpan) * HighlightDesat;
+	OutColor = lerp(OutColor, float3(Lum, Lum, Lum), saturate(DesatAmount));
+
+	if (GamutCompress > 0.0f)
+	{
+		OutColor = lerp(OutColor, float3(Lum, Lum, Lum), saturate(GamutCompress));
+	}
+
+	if (abs(Saturation - 1.0f) > 1.0e-4f)
+	{
+		OutColor = lerp(float3(Lum, Lum, Lum), OutColor, Saturation);
+	}
+
+	return max(OutColor + BlackLift, 0.0f);
+}

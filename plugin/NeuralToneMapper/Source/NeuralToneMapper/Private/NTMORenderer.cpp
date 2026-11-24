@@ -65,6 +65,12 @@ static TAutoConsoleVariable<int32> CVarNTMOGrading(
 	TEXT("Reproduce Unreal's colour grading (ExpandGamut + color correct) in the LUT bake.\n")
 	TEXT("-1: follow the project setting (default), 0: force off (pre-1.0.5 look), 1: force on"),
 	ECVF_RenderThreadSafe);
+// Same idea as r.NTMO.Grading: -1 follows the setting so shipping behaviour is fixed.
+static TAutoConsoleVariable<int32> CVarNTMOHue(
+	TEXT("r.NTMO.Hue"),
+	-1,
+	TEXT("0: hue-preserving MaxRGB curve (pre-1.0.6 look), 1: Unreal's per-channel curve + blue correction, -1: follow the project setting"),
+	ECVF_RenderThreadSafe);
 
 static TAutoConsoleVariable<int32> CVarNTMOLogLiveness(
 	TEXT("r.NTMO.LogLiveness"),
@@ -139,6 +145,20 @@ static const FMatrix44f GNTMOExpandMat = MakeNTMOMatrix(
 	1.3704123718f, -0.3292921877f, -0.0636831194f,
 	-0.0834334917f, 1.0970927480f, -0.0108613795f,
 	-0.0257933209f, -0.0986257988f, 1.2036949526f);
+// Blue correction, expressed in AP1: mul(AP0_2_AP1, mul(BlueCorrect, AP1_2_AP0)).
+// Unreal wraps its film curve in this pair (CombineLUTs ComputeFilmColorNoGamma), so a
+// tone mapper that skips it renders blues in a slightly different hue. Verified small
+// per colour (-0.5 deg to -3.5 deg at the default strength of 0.6) but systematic, and
+// it costs two 3x3 multiplies inside a bake that already runs.
+static const FMatrix44f GNTMOBlueCorrectAP1 = MakeNTMOMatrix(
+	0.9386393778f, 0.0000000001f, 0.0613606221f,
+	0.0000000000f, 0.8307941330f, 0.1692058671f,
+	-0.0000000000f, 0.0000000000f, 1.0000000001f);
+
+static const FMatrix44f GNTMOBlueCorrectInvAP1 = MakeNTMOMatrix(
+	1.0653748755f, 0.0000014467f, -0.0653710053f,
+	-0.0000003456f, 1.2036635245f, -0.2036677199f,
+	0.0000000198f, 0.0000000212f, 0.9999996001f);
 
 class FNTMOLutBakeCS : public FGlobalShader
 {
@@ -167,6 +187,10 @@ public:
 		SHADER_PARAMETER(FMatrix44f, NTMOToAP1)
 		SHADER_PARAMETER(FMatrix44f, NTMOFromAP1)
 		SHADER_PARAMETER(FMatrix44f, NTMOExpandMat)
+		SHADER_PARAMETER(float, NTMOUnrealHueBehavior)
+		SHADER_PARAMETER(float, NTMOBlueCorrection)
+		SHADER_PARAMETER(FMatrix44f, NTMOBlueCorrectAP1)
+		SHADER_PARAMETER(FMatrix44f, NTMOBlueCorrectInvAP1)
 		SHADER_PARAMETER(FVector4f, NTMOColorSaturation)
 		SHADER_PARAMETER(FVector4f, NTMOColorContrast)
 		SHADER_PARAMETER(FVector4f, NTMOColorGamma)
@@ -755,6 +779,14 @@ FScreenPassTexture FNTMORenderer::AddPasses(
 				PassParameters->NTMOToAP1 = GNTMOToAP1;
 				PassParameters->NTMOFromAP1 = GNTMOFromAP1;
 				PassParameters->NTMOExpandMat = GNTMOExpandMat;
+				const int32 HueCVar = CVarNTMOHue.GetValueOnRenderThread();
+				const bool bUnrealHue = (HueCVar < 0)
+					? GetDefault<UNTMOSettings>()->bMatchUnrealHueBehavior
+					: (HueCVar != 0);
+				PassParameters->NTMOUnrealHueBehavior = bUnrealHue ? 1.0f : 0.0f;
+				PassParameters->NTMOBlueCorrection = PP.BlueCorrection;
+				PassParameters->NTMOBlueCorrectAP1 = GNTMOBlueCorrectAP1;
+				PassParameters->NTMOBlueCorrectInvAP1 = GNTMOBlueCorrectInvAP1;
 
 				PassParameters->NTMOColorSaturation = ToV4f(PP.ColorSaturation);
 				PassParameters->NTMOColorContrast = ToV4f(PP.ColorContrast);
@@ -792,6 +824,14 @@ FScreenPassTexture FNTMORenderer::AddPasses(
 				PassParameters->NTMOToAP1 = GNTMOToAP1;
 				PassParameters->NTMOFromAP1 = GNTMOFromAP1;
 				PassParameters->NTMOExpandMat = GNTMOExpandMat;
+				const int32 HueCVar = CVarNTMOHue.GetValueOnRenderThread();
+				const bool bUnrealHue = (HueCVar < 0)
+					? GetDefault<UNTMOSettings>()->bMatchUnrealHueBehavior
+					: (HueCVar != 0);
+				PassParameters->NTMOUnrealHueBehavior = bUnrealHue ? 1.0f : 0.0f;
+				PassParameters->NTMOBlueCorrection = PP.BlueCorrection;
+				PassParameters->NTMOBlueCorrectAP1 = GNTMOBlueCorrectAP1;
+				PassParameters->NTMOBlueCorrectInvAP1 = GNTMOBlueCorrectInvAP1;
 
 				const FVector4f One(1.0f, 1.0f, 1.0f, 1.0f);
 				const FVector4f Zero(0.0f, 0.0f, 0.0f, 0.0f);

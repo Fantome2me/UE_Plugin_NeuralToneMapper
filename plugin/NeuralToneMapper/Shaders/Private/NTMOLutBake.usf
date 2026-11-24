@@ -72,6 +72,12 @@ float4 NTMOColorGammaHighlights;
 float4 NTMOColorGainHighlights;
 float4 NTMOColorOffsetHighlights;
 
+// Unreal-compatible hue behaviour (per-channel curve + blue correction around it).
+float NTMOUnrealHueBehavior;
+float NTMOBlueCorrection;
+float4x4 NTMOBlueCorrectAP1;
+float4x4 NTMOBlueCorrectInvAP1;
+
 float NTMOColorCorrectionShadowsMax;
 float NTMOColorCorrectionHighlightsMin;
 float NTMOColorCorrectionHighlightsMax;
@@ -129,7 +135,7 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	// ExpandGamut runs BEFORE the tone curve, in AP1; the curve then operates on colours
 	// that are already as wide as the display can use. Applying the same steps after the
 	// curve would be wrong - it is a pre-curve gamut operation, not a display tweak.
-	float3 GradedLinear = SceneLinearRaw;
+	float3 Mapped;
 	{
 		float3 ColorAP1 = mul((float3x3)NTMOToAP1, SceneLinearRaw);
 
@@ -148,20 +154,41 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			NTMOColorCorrectionHighlightsMin,
 			NTMOColorCorrectionHighlightsMax);
 
-		// Back to the working space. Unreal clamps here too; expand deliberately pushes
-		// colours out of gamut and the display cannot show what is left of them.
-		GradedLinear = max(0.0f, mul((float3x3)NTMOFromAP1, ColorAP1));
-	}
+		if (NTMOUnrealHueBehavior != 0)
+		{
+			// Unreal wraps its film curve in the blue correction (forward, curve, inverse),
+			// all in AP1, and applies the curve per channel. Doing the same here reproduces
+			// Unreal's hue drift instead of suppressing it.
+			const float3x3 BlueCorrect = (float3x3)NTMOBlueCorrectAP1;
+			const float3x3 BlueCorrectInv = (float3x3)NTMOBlueCorrectInvAP1;
 
-	const float3 Mapped = NTMO_ToneMapMaxRGB(
-		GradedLinear,
-		K,
-		NTMOSaturation,
-		NTMOGamutCompress,
-		NTMOHighlightDesat,
-		NTMOBlackLift,
-		NTMOMaxNits,
-		NTMOMinNits);
+			ColorAP1 = lerp(ColorAP1, mul(BlueCorrect, ColorAP1), NTMOBlueCorrection);
+
+			ColorAP1 = NTMO_ToneMapPerChannelAP1(
+				ColorAP1, K, NTMOHighlightDesat, NTMOBlackLift,
+				NTMOSaturation, NTMOGamutCompress, NTMOMaxNits, NTMOMinNits);
+
+			ColorAP1 = lerp(ColorAP1, mul(BlueCorrectInv, ColorAP1), NTMOBlueCorrection);
+
+			Mapped = max(0.0f, mul((float3x3)NTMOFromAP1, ColorAP1));
+		}
+		else
+		{
+			// Back to the working space. Unreal clamps here too; expand deliberately pushes
+			// colours out of gamut and the display cannot show what is left of them.
+			const float3 GradedLinear = max(0.0f, mul((float3x3)NTMOFromAP1, ColorAP1));
+
+			Mapped = NTMO_ToneMapMaxRGB(
+				GradedLinear,
+				K,
+				NTMOSaturation,
+				NTMOGamutCompress,
+				NTMOHighlightDesat,
+				NTMOBlackLift,
+				NTMOMaxNits,
+				NTMOMinNits);
+		}
+	}
 
 	// LINEAR display values, deliberately NOT encoded.
 	//
