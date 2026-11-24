@@ -203,7 +203,7 @@ public:
 	 * Turn it OFF only to deliberately bypass the project's grading.
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Look", meta = (DisplayName = "Match Unreal Colour Grading"))
-	bool bMatchUnrealColorGrading = true;
+	bool bMatchUnrealColorGrading = false;
 
 	/**
 	 * Match Unreal's HUE behaviour as well as its grading.
@@ -222,7 +222,7 @@ public:
 	 * switch that changes it.
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Look", meta = (DisplayName = "Match Unreal Hue Behaviour"))
-	bool bMatchUnrealHueBehavior = true;
+	bool bMatchUnrealHueBehavior = false;
 
 	// -----------------------------------------------------------------------
 	// Curve reshape (1.0.7)
@@ -272,7 +272,7 @@ public:
 	 * cannot inflate highlights that are already clipped.
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Look|Curve", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Chroma Compensation"))
-	float ChromaCompensation = 0.25f;
+	float ChromaCompensation = 0.0f;
 
 	/**
 	 * Multiplier on the learned local shadow lift.
