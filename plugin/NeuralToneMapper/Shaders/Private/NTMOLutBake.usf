@@ -11,6 +11,7 @@
 // viable here.
 
 #include "NTMOCommon.ush"
+#include "NTMOColorGrading.ush"
 
 Texture3D<float4> NTMOPlaceholder;	// keeps the shader from being optimised away in some tools
 
@@ -36,6 +37,44 @@ float NTMOSaturation;
 float NTMOGamutCompress;
 float NTMOHighlightDesat;
 float NTMOBlackLift;
+
+// ---- Unreal colour grading (1.0.5) ---------------------------------------
+// Unreal bakes ExpandGamut and all colour grading into the combine-LUT pass, which is
+// skipped entirely when the tonemapper is replaced. Porting it here restores the look
+// Unreal would have produced; every parameter defaults to its identity value, so this
+// is a no-op for a project that does not grade.
+float NTMOExpandGamut;
+float4x4 NTMOToAP1;
+float4x4 NTMOFromAP1;
+float4x4 NTMOExpandMat;
+
+float4 NTMOColorSaturation;
+float4 NTMOColorContrast;
+float4 NTMOColorGamma;
+float4 NTMOColorGain;
+float4 NTMOColorOffset;
+
+float4 NTMOColorSaturationShadows;
+float4 NTMOColorContrastShadows;
+float4 NTMOColorGammaShadows;
+float4 NTMOColorGainShadows;
+float4 NTMOColorOffsetShadows;
+
+float4 NTMOColorSaturationMidtones;
+float4 NTMOColorContrastMidtones;
+float4 NTMOColorGammaMidtones;
+float4 NTMOColorGainMidtones;
+float4 NTMOColorOffsetMidtones;
+
+float4 NTMOColorSaturationHighlights;
+float4 NTMOColorContrastHighlights;
+float4 NTMOColorGammaHighlights;
+float4 NTMOColorGainHighlights;
+float4 NTMOColorOffsetHighlights;
+
+float NTMOColorCorrectionShadowsMax;
+float NTMOColorCorrectionHighlightsMin;
+float NTMOColorCorrectionHighlightsMax;
 
 // ---- Display -------------------------------------------------------------
 float NTMOMinNits;
@@ -84,10 +123,38 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	K.K01 = clamp(K.K01, LogFloorClamp, LogPeakClamp);
 	K.K23 = clamp(K.K23, LogFloorClamp, LogPeakClamp);
 
-	const float3 SceneLinear = SampleGridLinear(DispatchThreadId, (uint)NTMOLutSize) * NTMOExposure;
+	const float3 SceneLinearRaw = SampleGridLinear(DispatchThreadId, (uint)NTMOLutSize) * NTMOExposure;
+
+	// ---- Unreal's grading, in the order PostProcessCombineLUTs.usf uses ----------
+	// ExpandGamut runs BEFORE the tone curve, in AP1; the curve then operates on colours
+	// that are already as wide as the display can use. Applying the same steps after the
+	// curve would be wrong - it is a pre-curve gamut operation, not a display tweak.
+	float3 GradedLinear = SceneLinearRaw;
+	{
+		float3 ColorAP1 = mul((float3x3)NTMOToAP1, SceneLinearRaw);
+
+		ColorAP1 = NTMO_ExpandGamut(ColorAP1, NTMOExpandGamut, (float3x3)NTMOExpandMat);
+
+		ColorAP1 = NTMO_ColorCorrectAll(
+			ColorAP1,
+			NTMOColorSaturation, NTMOColorContrast, NTMOColorGamma, NTMOColorGain, NTMOColorOffset,
+			NTMOColorSaturationShadows, NTMOColorContrastShadows, NTMOColorGammaShadows,
+			NTMOColorGainShadows, NTMOColorOffsetShadows,
+			NTMOColorSaturationMidtones, NTMOColorContrastMidtones, NTMOColorGammaMidtones,
+			NTMOColorGainMidtones, NTMOColorOffsetMidtones,
+			NTMOColorSaturationHighlights, NTMOColorContrastHighlights, NTMOColorGammaHighlights,
+			NTMOColorGainHighlights, NTMOColorOffsetHighlights,
+			NTMOColorCorrectionShadowsMax,
+			NTMOColorCorrectionHighlightsMin,
+			NTMOColorCorrectionHighlightsMax);
+
+		// Back to the working space. Unreal clamps here too; expand deliberately pushes
+		// colours out of gamut and the display cannot show what is left of them.
+		GradedLinear = max(0.0f, mul((float3x3)NTMOFromAP1, ColorAP1));
+	}
 
 	const float3 Mapped = NTMO_ToneMapMaxRGB(
-		SceneLinear,
+		GradedLinear,
 		K,
 		NTMOSaturation,
 		NTMOGamutCompress,

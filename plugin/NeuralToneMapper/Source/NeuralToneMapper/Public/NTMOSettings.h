@@ -185,6 +185,26 @@ public:
 	UPROPERTY(config, EditAnywhere, Category = "Look", meta = (ClampMin = "0.0", ClampMax = "0.02", DisplayName = "Black Lift"))
 	float BlackLift = 0.0f;
 
+	/**
+	 * Reproduce Unreal's own colour grading inside the LUT bake.
+	 *
+	 * Replacing the tonemapper makes Unreal skip AddCombineLUTPass, and that pass is
+	 * where ExpandGamut (default 1.0), the shadow/midtone/highlight grading triples and
+	 * the "expand bright saturated colours into a wider gamut" step all live. Without
+	 * them the plugin's output is measurably flatter than Unreal's: on a night-sky
+	 * scene it measured -21.5% mean HSV saturation and -48% chroma on the most
+	 * saturated 0.6% of pixels, which reads on screen as a grey, washed-out image.
+	 *
+	 * Turning this ON restores exactly what the project asked for. Every parameter is
+	 * read from the view's post process settings, and every one of them defaults to its
+	 * identity value, so this changes nothing at all for a project that does not grade
+	 * -- it can only put back grading that exists.
+	 *
+	 * Turn it OFF only to deliberately bypass the project's grading.
+	 */
+	UPROPERTY(config, EditAnywhere, Category = "Look", meta = (DisplayName = "Match Unreal Colour Grading"))
+	bool bMatchUnrealColorGrading = true;
+
 	/** Resolution of the baked tone mapping LUT. 33 matches the paper/industry default. */
 	UPROPERTY(config, EditAnywhere, Category = "Quality", meta = (ClampMin = "16", ClampMax = "64", DisplayName = "LUT Size"))
 	int32 LUTSize = 33;

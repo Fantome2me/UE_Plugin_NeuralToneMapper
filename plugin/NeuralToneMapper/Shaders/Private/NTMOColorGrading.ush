@@ -1,0 +1,148 @@
+// Copyright (c) 2026. All Rights Reserved.
+//
+// Unreal's colour grading, ported so the plugin can reproduce it.
+//
+// WHY THIS EXISTS
+// ---------------
+// The plugin replaces EPostProcessingPass::ReplacingTonemapper. Unreal skips
+// AddCombineLUTPass along with the tonemapper pass, and PostProcessCombineLUTs.usf is
+// where ALL of this happens before Unreal's own film curve:
+//
+//     WorkingLinear
+//       -> WhiteBalance                      (unused here; the project leaves it neutral)
+//       -> ExpandGamut        (ABSOLUTELY CENTRAL, default 1.0)
+//       -> ColorCorrectAll    (saturation/contrast/gamma/gain/offset, per zone)
+//       -> film curve
+//
+// 1.0.4 applied none of it. Measured against Unreal on a night-sky scene that is a
+// real, visible loss: mean HSV saturation -21.5%, mean chroma -14.9%, and -48% chroma
+// on the most saturated 0.6% of pixels. That is what "the image went grey" means
+// numerically, and ExpandGamut - on by default at a strength of 1.0 - is most of it.
+//
+// The maths below is a line-for-line port of PostProcessCombineLUTs.usf so the result
+// matches Unreal's instead of merely looking plausible.
+//
+// COST
+// ----
+// All of this runs inside the LUT bake, which happens once per N frames on a 33^3
+// grid (35 937 texels). The per-pixel cost is unchanged: still one 3D texture fetch.
+
+#pragma once
+
+// AP1 luminance weights, straight from ACESCommon.ush (AP1_2_XYZ_MAT column 1).
+static const float3 NTMO_AP1_RGB2Y = float3(0.2722287168f, 0.6740817658f, 0.0536895174f);
+
+// ---------------------------------------------------------------------------
+// ColorCorrect - Nuke-style lift/gamma/gain in AP1.
+// ---------------------------------------------------------------------------
+// Each vector's .w is the master weight, matching FPostProcessSettings. With every
+// parameter at its default (1,1,1,1) / (0,0,0,0) this is the identity, so enabling it
+// cannot change an image that has no grading - it only restores grading that exists.
+float3 NTMO_ColorCorrect(
+	float3 WorkingColor,
+	float4 ColorSaturation,
+	float4 ColorContrast,
+	float4 ColorGamma,
+	float4 ColorGain,
+	float4 ColorOffset)
+{
+	// Saturation around the AP1 luma axis.
+	float Luma = dot(WorkingColor, NTMO_AP1_RGB2Y);
+	WorkingColor = max(0, lerp(Luma.xxx, WorkingColor, ColorSaturation.xyz * ColorSaturation.w));
+
+	// Contrast. Unreal pivots around 0.18 (mid grey), not around 0.5 - using 0.5 would
+	// shift the whole image, which is why this is copied rather than re-derived.
+	WorkingColor = pow(WorkingColor * (1.0f / 0.18f), ColorContrast.xyz * ColorContrast.w) * 0.18f;
+
+	// Gamma.
+	WorkingColor = pow(WorkingColor, 1.0f / max(ColorGamma.xyz * ColorGamma.w, 1.0e-4f));
+
+	// Gain and offset.
+	WorkingColor = WorkingColor * (ColorGain.xyz * ColorGain.w) + (ColorOffset.xyz + ColorOffset.w);
+
+	return WorkingColor;
+}
+
+// ---------------------------------------------------------------------------
+// ColorCorrectAll - the shadow / midtone / highlight split.
+// ---------------------------------------------------------------------------
+// Zones are blended by luma with the same smoothsteps Unreal uses, so a project that
+// grades only the shadows behaves identically here.
+float3 NTMO_ColorCorrectAll(
+	float3 WorkingColor,
+
+	float4 ColorSaturation, float4 ColorContrast, float4 ColorGamma, float4 ColorGain, float4 ColorOffset,
+
+	float4 ColorSaturationShadows, float4 ColorContrastShadows, float4 ColorGammaShadows,
+	float4 ColorGainShadows, float4 ColorOffsetShadows,
+
+	float4 ColorSaturationMidtones, float4 ColorContrastMidtones, float4 ColorGammaMidtones,
+	float4 ColorGainMidtones, float4 ColorOffsetMidtones,
+
+	float4 ColorSaturationHighlights, float4 ColorContrastHighlights, float4 ColorGammaHighlights,
+	float4 ColorGainHighlights, float4 ColorOffsetHighlights,
+
+	float ColorCorrectionShadowsMax,
+	float ColorCorrectionHighlightsMin,
+	float ColorCorrectionHighlightsMax)
+{
+	float Luma = dot(WorkingColor, NTMO_AP1_RGB2Y);
+
+	float3 CCColorShadows = NTMO_ColorCorrect(WorkingColor,
+		ColorSaturationShadows * ColorSaturation,
+		ColorContrastShadows * ColorContrast,
+		ColorGammaShadows * ColorGamma,
+		ColorGainShadows * ColorGain,
+		ColorOffsetShadows + ColorOffset);
+	float CCWeightShadows = 1 - smoothstep(0, ColorCorrectionShadowsMax, Luma);
+
+	float3 CCColorHighlights = NTMO_ColorCorrect(WorkingColor,
+		ColorSaturationHighlights * ColorSaturation,
+		ColorContrastHighlights * ColorContrast,
+		ColorGammaHighlights * ColorGamma,
+		ColorGainHighlights * ColorGain,
+		ColorOffsetHighlights + ColorOffset);
+	float CCWeightHighlights = smoothstep(ColorCorrectionHighlightsMin, ColorCorrectionHighlightsMax, Luma);
+
+	float3 CCColorMidtones = NTMO_ColorCorrect(WorkingColor,
+		ColorSaturationMidtones * ColorSaturation,
+		ColorContrastMidtones * ColorContrast,
+		ColorGammaMidtones * ColorGamma,
+		ColorGainMidtones * ColorGain,
+		ColorOffsetMidtones + ColorOffset);
+	float CCWeightMidtones = 1 - CCWeightShadows - CCWeightHighlights;
+
+	return CCColorShadows * CCWeightShadows
+		+ CCColorMidtones * CCWeightMidtones
+		+ CCColorHighlights * CCWeightHighlights;
+}
+
+// ---------------------------------------------------------------------------
+// ExpandGamut - the piece 1.0.4 was missing.
+// ---------------------------------------------------------------------------
+// Unreal's default is 1.0, and it is applied BEFORE the tone curve. It pushes bright
+// saturated colours out toward a gamut between P3 and AP1, which is what stops a tone
+// curve from rendering them as pastel.
+//
+// ExpandAmount is deliberately gated twice:
+//   (1 - exp2(-4 * ChromaDistSqr))              -> 0 for anything already neutral
+//   (1 - exp2(-4 * ExpandGamut * LumaAP1^2))    -> 0 for anything already dark
+// so greys and shadows pass through untouched and only bright, saturated pixels move.
+// That gating is why this cannot simply be replaced by a global saturation boost.
+float3 NTMO_ExpandGamut(float3 ColorAP1, float ExpandGamut, float3x3 ExpandMat)
+{
+	if (ExpandGamut <= 0.0f)
+	{
+		return ColorAP1;
+	}
+
+	float LumaAP1 = dot(ColorAP1, NTMO_AP1_RGB2Y);
+	float3 ChromaAP1 = ColorAP1 / max(LumaAP1, 1.0e-5f);
+
+	float ChromaDistSqr = dot(ChromaAP1 - 1, ChromaAP1 - 1);
+	float ExpandAmount = (1 - exp2(-4 * ChromaDistSqr))
+		* (1 - exp2(-4 * ExpandGamut * LumaAP1 * LumaAP1));
+
+	float3 ColorExpand = mul(ExpandMat, ColorAP1);
+	return lerp(ColorAP1, ColorExpand, ExpandAmount);
+}

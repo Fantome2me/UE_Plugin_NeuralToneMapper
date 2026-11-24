@@ -55,6 +55,16 @@ static TAutoConsoleVariable<int32> CVarNTMOGamutCompressPercent(
 	0,
 	TEXT("Gamut compression strength in percent (0..100). 0 = off."),
 	ECVF_RenderThreadSafe);
+// Runtime A/B switch for the Unreal grading port. -1 follows the project setting, so
+// shipping behaviour is unchanged; 0/1 exist so the difference can be measured inside
+// one editor session (comparing two separate launches is useless here: auto exposure
+// and the animated sky move the baseline by more than the effect being measured).
+static TAutoConsoleVariable<int32> CVarNTMOGrading(
+	TEXT("r.NTMO.Grading"),
+	-1,
+	TEXT("Reproduce Unreal's colour grading (ExpandGamut + color correct) in the LUT bake.\n")
+	TEXT("-1: follow the project setting (default), 0: force off (pre-1.0.5 look), 1: force on"),
+	ECVF_RenderThreadSafe);
 
 static TAutoConsoleVariable<int32> CVarNTMOLogLiveness(
 	TEXT("r.NTMO.LogLiveness"),
@@ -93,6 +103,43 @@ extern int32 NTMO_GetRequestedEnable();
 // ---------------------------------------------------------------------------
 // Shaders
 // ---------------------------------------------------------------------------
+
+// Working space <-> AP1, and the "in between P3 and AP1" expansion matrix.
+//
+// Lifted from ACESCommon.ush / PostProcessCombineLUTs.usf rather than re-derived:
+// FromAP1 is XYZ_2_sRGB * D60_2_D65_CAT * AP1_2_XYZ exactly as Unreal builds it, and
+// ToAP1 is its numerical inverse so a round trip is lossless (verified: max error
+// 7.6e-17, and white maps to white). ExpandMat is Wide_2_AP1 * AP1_2_sRGB, i.e. the
+// "bizarre matrix but this expands sRGB to between P3 and AP1" from the engine source.
+// TMatrix has no 16-float constructor, so each one is built from an identity and
+// filled in by member. Only the upper-left 3x3 matters; the shader casts it down.
+static FMatrix44f MakeNTMOMatrix(
+	float M00, float M01, float M02,
+	float M10, float M11, float M12,
+	float M20, float M21, float M22)
+{
+	FMatrix44f Result(FMatrix44f::Identity);
+	Result.M[0][0] = M00; Result.M[0][1] = M01; Result.M[0][2] = M02;
+	Result.M[1][0] = M10; Result.M[1][1] = M11; Result.M[1][2] = M12;
+	Result.M[2][0] = M20; Result.M[2][1] = M21; Result.M[2][2] = M22;
+	return Result;
+}
+
+static const FMatrix44f GNTMOToAP1 = MakeNTMOMatrix(
+	0.6130974024f, 0.3395231461f, 0.0473794515f,
+	0.0701937225f, 0.9163538791f, 0.0134523985f,
+	0.0206155929f, 0.1095697730f, 0.8698146342f);
+
+static const FMatrix44f GNTMOFromAP1 = MakeNTMOMatrix(
+	1.7050509926f, -0.6217921205f, -0.0832588722f,
+	-0.1302564175f, 1.1408047365f, -0.0105483190f,
+	-0.0240033568f, -0.1289689761f, 1.1529723328f);
+
+static const FMatrix44f GNTMOExpandMat = MakeNTMOMatrix(
+	1.3704123718f, -0.3292921877f, -0.0636831194f,
+	-0.0834334917f, 1.0970927480f, -0.0108613795f,
+	-0.0257933209f, -0.0986257988f, 1.2036949526f);
+
 class FNTMOLutBakeCS : public FGlobalShader
 {
 public:
@@ -113,6 +160,36 @@ public:
 		SHADER_PARAMETER(float, NTMOMaxNits)
 		SHADER_PARAMETER(float, NTMOMaxFullFrameNits)
 		SHADER_PARAMETER(float, NTMOPaperWhiteNits)
+		// Unreal's colour grading, ported. Unreal bakes all of this into the
+		// combine-LUT pass, which is skipped when the tonemapper is replaced, so the
+		// bake has to reproduce it or the image comes out flatter than Unreal's.
+		SHADER_PARAMETER(float, NTMOExpandGamut)
+		SHADER_PARAMETER(FMatrix44f, NTMOToAP1)
+		SHADER_PARAMETER(FMatrix44f, NTMOFromAP1)
+		SHADER_PARAMETER(FMatrix44f, NTMOExpandMat)
+		SHADER_PARAMETER(FVector4f, NTMOColorSaturation)
+		SHADER_PARAMETER(FVector4f, NTMOColorContrast)
+		SHADER_PARAMETER(FVector4f, NTMOColorGamma)
+		SHADER_PARAMETER(FVector4f, NTMOColorGain)
+		SHADER_PARAMETER(FVector4f, NTMOColorOffset)
+		SHADER_PARAMETER(FVector4f, NTMOColorSaturationShadows)
+		SHADER_PARAMETER(FVector4f, NTMOColorContrastShadows)
+		SHADER_PARAMETER(FVector4f, NTMOColorGammaShadows)
+		SHADER_PARAMETER(FVector4f, NTMOColorGainShadows)
+		SHADER_PARAMETER(FVector4f, NTMOColorOffsetShadows)
+		SHADER_PARAMETER(FVector4f, NTMOColorSaturationMidtones)
+		SHADER_PARAMETER(FVector4f, NTMOColorContrastMidtones)
+		SHADER_PARAMETER(FVector4f, NTMOColorGammaMidtones)
+		SHADER_PARAMETER(FVector4f, NTMOColorGainMidtones)
+		SHADER_PARAMETER(FVector4f, NTMOColorOffsetMidtones)
+		SHADER_PARAMETER(FVector4f, NTMOColorSaturationHighlights)
+		SHADER_PARAMETER(FVector4f, NTMOColorContrastHighlights)
+		SHADER_PARAMETER(FVector4f, NTMOColorGammaHighlights)
+		SHADER_PARAMETER(FVector4f, NTMOColorGainHighlights)
+		SHADER_PARAMETER(FVector4f, NTMOColorOffsetHighlights)
+		SHADER_PARAMETER(float, NTMOColorCorrectionShadowsMax)
+		SHADER_PARAMETER(float, NTMOColorCorrectionHighlightsMin)
+		SHADER_PARAMETER(float, NTMOColorCorrectionHighlightsMax)
 		SHADER_PARAMETER(int32, NTMOLutSize)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture3D<float4>, RWOutputLUT)
 	END_SHADER_PARAMETER_STRUCT()
@@ -655,6 +732,95 @@ FScreenPassTexture FNTMORenderer::AddPasses(
 		PassParameters->NTMOMaxNits = Ctx.MaxLuminanceNits;
 		PassParameters->NTMOMaxFullFrameNits = Ctx.MaxFullFrameLuminanceNits;
 		PassParameters->NTMOPaperWhiteNits = Ctx.PaperWhiteNits;
+
+		// ---- Unreal colour grading ----
+		// The values come straight from the view's post process settings, so whatever the
+		// project grades -- post process volumes included -- is reproduced here instead of
+		// being silently dropped with AddCombineLUTPass.
+		{
+			const FPostProcessSettings& PP = View.FinalPostProcessSettings;
+			const int32 GradingCVar = CVarNTMOGrading.GetValueOnRenderThread();
+			const bool bGrading = (GradingCVar < 0)
+				? GetDefault<UNTMOSettings>()->bMatchUnrealColorGrading
+				: (GradingCVar != 0);
+
+			auto ToV4f = [](const FVector4& V)
+			{
+				return FVector4f((float)V.X, (float)V.Y, (float)V.Z, (float)V.W);
+			};
+
+			if (bGrading)
+			{
+				PassParameters->NTMOExpandGamut = PP.ExpandGamut;
+				PassParameters->NTMOToAP1 = GNTMOToAP1;
+				PassParameters->NTMOFromAP1 = GNTMOFromAP1;
+				PassParameters->NTMOExpandMat = GNTMOExpandMat;
+
+				PassParameters->NTMOColorSaturation = ToV4f(PP.ColorSaturation);
+				PassParameters->NTMOColorContrast = ToV4f(PP.ColorContrast);
+				PassParameters->NTMOColorGamma = ToV4f(PP.ColorGamma);
+				PassParameters->NTMOColorGain = ToV4f(PP.ColorGain);
+				PassParameters->NTMOColorOffset = ToV4f(PP.ColorOffset);
+
+				PassParameters->NTMOColorSaturationShadows = ToV4f(PP.ColorSaturationShadows);
+				PassParameters->NTMOColorContrastShadows = ToV4f(PP.ColorContrastShadows);
+				PassParameters->NTMOColorGammaShadows = ToV4f(PP.ColorGammaShadows);
+				PassParameters->NTMOColorGainShadows = ToV4f(PP.ColorGainShadows);
+				PassParameters->NTMOColorOffsetShadows = ToV4f(PP.ColorOffsetShadows);
+
+				PassParameters->NTMOColorSaturationMidtones = ToV4f(PP.ColorSaturationMidtones);
+				PassParameters->NTMOColorContrastMidtones = ToV4f(PP.ColorContrastMidtones);
+				PassParameters->NTMOColorGammaMidtones = ToV4f(PP.ColorGammaMidtones);
+				PassParameters->NTMOColorGainMidtones = ToV4f(PP.ColorGainMidtones);
+				PassParameters->NTMOColorOffsetMidtones = ToV4f(PP.ColorOffsetMidtones);
+
+				PassParameters->NTMOColorSaturationHighlights = ToV4f(PP.ColorSaturationHighlights);
+				PassParameters->NTMOColorContrastHighlights = ToV4f(PP.ColorContrastHighlights);
+				PassParameters->NTMOColorGammaHighlights = ToV4f(PP.ColorGammaHighlights);
+				PassParameters->NTMOColorGainHighlights = ToV4f(PP.ColorGainHighlights);
+				PassParameters->NTMOColorOffsetHighlights = ToV4f(PP.ColorOffsetHighlights);
+
+				PassParameters->NTMOColorCorrectionShadowsMax = PP.ColorCorrectionShadowsMax;
+				PassParameters->NTMOColorCorrectionHighlightsMin = PP.ColorCorrectionHighlightsMin;
+				PassParameters->NTMOColorCorrectionHighlightsMax = PP.ColorCorrectionHighlightsMax;
+			}
+			else
+			{
+				// Identity: no gamut expansion, no grading. Used to A/B against the look
+				// the plugin produced before 1.0.5.
+				PassParameters->NTMOExpandGamut = 0.0f;
+				PassParameters->NTMOToAP1 = GNTMOToAP1;
+				PassParameters->NTMOFromAP1 = GNTMOFromAP1;
+				PassParameters->NTMOExpandMat = GNTMOExpandMat;
+
+				const FVector4f One(1.0f, 1.0f, 1.0f, 1.0f);
+				const FVector4f Zero(0.0f, 0.0f, 0.0f, 0.0f);
+				PassParameters->NTMOColorSaturation = One;
+				PassParameters->NTMOColorContrast = One;
+				PassParameters->NTMOColorGamma = One;
+				PassParameters->NTMOColorGain = One;
+				PassParameters->NTMOColorOffset = Zero;
+				PassParameters->NTMOColorSaturationShadows = One;
+				PassParameters->NTMOColorContrastShadows = One;
+				PassParameters->NTMOColorGammaShadows = One;
+				PassParameters->NTMOColorGainShadows = One;
+				PassParameters->NTMOColorOffsetShadows = Zero;
+				PassParameters->NTMOColorSaturationMidtones = One;
+				PassParameters->NTMOColorContrastMidtones = One;
+				PassParameters->NTMOColorGammaMidtones = One;
+				PassParameters->NTMOColorGainMidtones = One;
+				PassParameters->NTMOColorOffsetMidtones = Zero;
+				PassParameters->NTMOColorSaturationHighlights = One;
+				PassParameters->NTMOColorContrastHighlights = One;
+				PassParameters->NTMOColorGammaHighlights = One;
+				PassParameters->NTMOColorGainHighlights = One;
+				PassParameters->NTMOColorOffsetHighlights = Zero;
+				PassParameters->NTMOColorCorrectionShadowsMax = 0.09f;
+				PassParameters->NTMOColorCorrectionHighlightsMin = 0.5f;
+				PassParameters->NTMOColorCorrectionHighlightsMax = 1.0f;
+			}
+		}
+
 		PassParameters->NTMOLutSize = LutSize;
 		PassParameters->RWOutputLUT = GraphBuilder.CreateUAV(FRDGTextureUAVDesc(LutTexture));
 

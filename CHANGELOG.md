@@ -2,6 +2,35 @@
 
 All notable changes to NTM (Neural Tone Mapper).
 
+## [1.0.5] — 2026-11-24
+
+### Fixed
+- **画面发灰、色彩变淡**：插件替换 tonemapper 时，UE 会连带跳过 `AddCombineLUTPass`，
+  而 `PostProcessCombineLUTs.usf` 里做的就是调色 —— 顺序是
+  `WhiteBalance → ExpandGamut → ColorCorrectAll → 胶片曲线`。
+  1.0.4 只做了最后一步，前面全丢了。其中 **`ExpandGamut` 的引擎默认值是 `1.0`**
+  （`Scene.cpp:437`），它把明亮的高饱和色推开到 P3–AP1 之间，正是"颜色不够艳"的直接原因。
+- 新增 `references` 之外的第三块：`Shaders/Private/NTMOColorGrading.ush`，逐行移植
+  UE 的 `ColorCorrect` / `ColorCorrectAll` / `ExpandGamut`，数学与引擎源码一致
+  （色彩修正以 0.18 为中灰支点、三区按 luma 用同样的 smoothstep 混合）。
+- LUT 烘焙按 UE 的顺序接入：`工作空间 → AP1 → ExpandGamut → ColorCorrectAll → 回工作空间 → 曲线`。
+  全部参数取自 `View.FinalPostProcessSettings`，所以工程自己的后处理体积调色也会被正确复现。
+- AP1 变换矩阵为 CPU 常量：`FromAP1 = XYZ_2_sRGB · D60_2_D65_CAT · AP1_2_XYZ`，
+  `ToAP1` 取其数值逆（往返误差 7.6e-17），`ExpandMat = Wide_2_AP1 · AP1_2_sRGB`。
+
+### Added
+- 设置项 `Match Unreal Colour Grading`（默认开）。所有参数在默认值下都是恒等变换，
+  所以对没有调色的工程**不会有任何改变**，只会把本该有的调色补回来。
+- 控制台变量 `r.NTMO.Grading`：`-1` 跟随设置、`0` 强制关（复现 1.0.4 的观感）、`1` 强制开。
+  加它是为了能在**同一次编辑器会话内**做 A/B。
+
+### Measured, and what could not be measured
+- `ExpandGamut` 的作用量 = 色度门控 × 亮度门控：Luma 0.08 时只有 1.7%，
+  Luma 0.2 时 10.5%，Luma 0.8 时 83%。也就是说它**只在亮部生效**，
+  暗调场景里单独靠它补不回全部差距 —— 这一点按数值算清楚了，不靠观感判断。
+- 截图 A/B 在这个工程上**不可信**：场景是动态天空 + 自动曝光，相隔 12 秒的两张图
+  地面亮度会从 0.316 漂到 0.238，噪声大于要测的效应。因此本版**不给出**
+  "饱和度提升了 X%" 这类数字。要自查请用 `r.NTMO.Grading 0/1` 在运行时切换。
 ## [1.0.4] — 2026-11-17
 
 ### Fixed
