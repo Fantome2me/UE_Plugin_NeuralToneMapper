@@ -1,3 +1,72 @@
+## 1.1.1 — "画面还是平"：找回被一起关掉的 ExpandGamut
+
+### 根因
+
+1.0.8 为了压掉"偏色"，把 `bMatchUnrealColorGrading` 整个关掉。但那个开关**同时**控制两件不相干的事：
+
+```
+if (bGrading)  { ExpandGamut = PP.ExpandGamut;  ColorCorrectAll(...); }
+else           { ExpandGamut = 0.0f;            /* 分级参数置恒等 */ }
+```
+
+- **ExpandGamut** 是 UE 色调映射链里曲线**之前**的一步（默认 1.0），属于 tonemapper，不是调色
+- **ColorCorrectAll** 才是对后处理体积里 lift/gamma/gain 的复现
+
+关掉整个开关 = 连 UE 的色域扩展一起丢了。而这条后果**写在我自己的注释里**，我当时没读：
+
+> "Without them the plugin's output is **measurably flatter than Unreal's**: on a night-sky
+> scene it measured **−21.5% mean HSV saturation and −48% chroma** on the most saturated 0.6%
+> of pixels, which reads on screen as a **grey, washed-out image**."
+
+所以 1.0.8 之后的每个版本：曲线是对的，但渲染出来比 UE 更灰 —— 这就是"平"。
+
+### 修法
+
+把两者拆开，各自一个开关：
+
+| 开关 | 默认 | 含义 |
+|---|---|---|
+| `bMatchUnrealGamutExpansion` | **True** | 保留 UE 的 ExpandGamut（色域扩展） |
+| `bMatchUnrealColorGrading` | False | 后处理体积的调色（会带色相偏移，保持关闭） |
+| `r.NTMO.GamutExpand` | -1 | 运行时覆盖：-1 用设置，0 关，1 开 |
+
+引擎内实测确认：
+
+```
+[NTMO] gamut expand: setting=1 cvar=-1 PP.ExpandGamut=1.000 -> NTMOExpandGamut=1.000 (grading off)
+```
+
+**色域扩展回来了（1.000），分级仍然关闭（不会有偏色）。**
+
+### 同时修掉的两个死设置
+
+上一轮我把 3 个死设置标了 deprecated，这次写了个审计脚本全量扫，又抓出 2 个：
+
+| 设置 | 问题 |
+|---|---|
+| `AssumeFullFrameFraction` | 从 1.0.0 就在，**从来没被读取过**，却在 UI 上承诺"EDID 不完整时用它估算全帧亮度" |
+| `bShowDebugOverlay` | 承诺"角落显示曲线图"的调试视图，**根本没实现**，只被 UHT 生成文件引用 |
+
+均已标注 deprecated（保留属性以兼容旧 ini）。
+
+### 新增：契约审计脚本
+
+`dev/audit/audit_contracts.py` —— 把这次人工查出的每类问题都变成可复跑的检查：
+
+| 检查 | 内容 |
+|---|---|
+| A | 每个 UPROPERTY 默认值必须与出厂 ini 一致（抓到了 `bEnabled`、`HighlightDesaturation`） |
+| B | 每个 UPROPERTY 必须被头文件外的代码读取（抓到 5 个死设置） |
+| C | C++ 设的着色器参数必须在 .usf 里出现（98 个） |
+| D | .usf 声明的全局必须被使用（22 个） |
+| E | 三份插件副本的版本号必须一致 |
+| F | 模型输入形状必须与 C++ 的 `NTMOInput` 契约一致 |
+
+退出码非 0 即可卡住发布。这次全绿。
+
+### 曲线未变
+
+`18% 0.165 / 100nit 0.709 / peak 98.3 nit`，与 1.1.0 完全一致，无 shader/RDG 错误。
 ## 1.1.0 — 全量复查：修掉 5 处代码问题 + 2 处模型问题
 
 ### 复查发现的问题
