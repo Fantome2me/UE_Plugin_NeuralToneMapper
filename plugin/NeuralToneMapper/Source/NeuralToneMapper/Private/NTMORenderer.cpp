@@ -1251,7 +1251,7 @@ FScreenPassTexture FNTMORenderer::AddPasses(
 
 								const float XMid = FMath::Log2(0.18f);
 								UE_LOG(LogTemp, Warning,
-									TEXT("[NTMO] Effective curve | 18%% grey %.3f -> %.3f (ACES 0.267) | 100 nit %.3f -> %.3f (ACES 0.804) | peak %.1f -> %.1f nit (panel %.0f)"),
+									TEXT("[NTMO] Effective curve | 18%% grey %.3f -> %.3f (UE 0.180) | 100 nit %.3f -> %.3f (UE 0.723) | peak %.1f -> %.1f nit (panel %.0f)"),
 									FMath::Pow(2.0f, EvalCurve(XMid, Raw)), FMath::Pow(2.0f, EvalCurve(XMid, Shaped)),
 									FMath::Pow(2.0f, EvalCurve(0.0f, Raw)), FMath::Pow(2.0f, EvalCurve(0.0f, Shaped)),
 									FMath::Pow(2.0f, Raw[7]) * 100.0f, FMath::Pow(2.0f, Shaped[7]) * 100.0f,

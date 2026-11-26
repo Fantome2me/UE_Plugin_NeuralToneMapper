@@ -253,7 +253,7 @@ public:
 
 	/** Mid-grey lift in stops. 0 disables the lift (pre-1.0.7 behaviour). */
 	UPROPERTY(config, EditAnywhere, Category = "Look|Curve", meta = (ClampMin = "0.0", ClampMax = "2.0", DisplayName = "Mid-Grey Anchor (stops)"))
-	float MidGreyAnchorStops = 0.45f;
+	float MidGreyAnchorStops = 0.0f;
 
 	/** Width of the mid-grey lift in stops. Narrower keeps the effect off the shadows. */
 	UPROPERTY(config, EditAnywhere, Category = "Look|Curve", meta = (ClampMin = "0.25", ClampMax = "6.0", DisplayName = "Mid-Grey Anchor Width"))
@@ -261,7 +261,7 @@ public:
 
 	/** How much of the remaining gap to the panel peak the shoulder closes (0..1). */
 	UPROPERTY(config, EditAnywhere, Category = "Look|Curve", meta = (ClampMin = "0.0", ClampMax = "1.0", DisplayName = "Peak Fill"))
-	float PeakFill = 0.70f;
+	float PeakFill = 0.0f;
 
 	/**
 	 * Chroma compensation: give colour back exactly where luminance was compressed.

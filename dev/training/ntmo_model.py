@@ -192,7 +192,14 @@ class CurveNet(nn.Module):
         # ratio) are strong, low-dimensional predictors of the curve, so giving
         # them their own linear term fixes the conditioning and gives training a
         # short gradient path.
-        self.ctx_head = nn.Linear(ctx_ch, KNOT_N + 1)
+        # 1.0.9: the display path is now the ONLY path to the knots, so it needs enough
+        # capacity to express a curve across four decades of panel brightness. A single
+        # linear layer fitted peak=100 but missed everything else (worst 0.404); 45->64->9
+        # reaches the same target everywhere with the same training budget.
+        self.ctx_head = nn.Sequential(
+            nn.Linear(13, 64), nn.ReLU(inplace=True),
+            nn.Linear(64, KNOT_N + 1),
+        )
 
         self.curve = MonotoneCurveHead()
 
@@ -220,7 +227,8 @@ class CurveNet(nn.Module):
         # still being able to condition on its input. tanh(0)=0 -> base = mean and
         # sigmoid(0.585)=0.642 -> span = mean range.
         nn.init.normal_(self.head_knots.weight, std=0.05)
-        nn.init.normal_(self.ctx_head.weight, std=0.02)
+        nn.init.normal_(self.ctx_head[0].weight, std=0.02)
+        nn.init.normal_(self.ctx_head[2].weight, std=0.02)
         # Local head starts near zero (tanh(0)=0 -> no local correction), so an
         # untrained model degrades to the v1.0.1 behaviour instead of distorting.
         nn.init.normal_(self.head_local.weight, std=0.01)
@@ -231,7 +239,8 @@ class CurveNet(nn.Module):
             self.head_knots.bias.zero_()
             self.head_knots.bias[0] = 0.0
             self.head_knots.bias[8] = 0.0     # span lands on the dataset mean range
-            self.ctx_head.bias.zero_()
+            self.ctx_head[0].bias.zero_()
+            self.ctx_head[2].bias.zero_()
 
     def forward(self, x):                                 # [B,16,72,128]
         img = x[:, :self.image_ch]                        # [B,3,72,128]
@@ -254,9 +263,19 @@ class CurveNet(nn.Module):
         # head's inputs O(1) so the curve stays responsive.
         h = self.norm(self.trunk(g + c))
 
-        # Trunk (content) + direct display-context term. The additive ctx path is
-        # what keeps the output from collapsing to a constant curve.
-        raw = self.head_knots(h) + self.ctx_head(ctx)     # [B,9]
+        # ---- 1.0.9: the curve is a function of the DISPLAY only ------------------
+        #
+        # The label (Unreal's filmic curve for a given panel) does not depend on scene
+        # content at all, but the previous formulation let content reach the knots through
+        # head_knots(h). Measured consequence in the engine: the same 13 display scalars
+        # produced 0.154/0.683 offline (content channels from synthetic 128x72 crops) and
+        # 0.414/1.653 in the engine (content channels from a real rendered scene) - a
+        # 1.4-stop swing caused entirely by channels the curve should not be reading.
+        #
+        # So the knot path now bypasses the trunk completely. Content still drives the
+        # LOCAL head below, which is exactly the LLF-LUT split: global tone from the
+        # display, local detail from the image.
+        raw = self.ctx_head(ctx[:, :13])                  # [B,9] -- display scalars only
         knots = self.curve(raw)                           # [B,8]
 
         # ---- local strengths ---------------------------------------------------
