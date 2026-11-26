@@ -197,7 +197,7 @@ class CurveNet(nn.Module):
         # linear layer fitted peak=100 but missed everything else (worst 0.404); 45->64->9
         # reaches the same target everywhere with the same training budget.
         self.ctx_head = nn.Sequential(
-            nn.Linear(13, 64), nn.ReLU(inplace=True),
+            nn.Linear(11, 64), nn.ReLU(inplace=True),
             nn.Linear(64, KNOT_N + 1),
         )
 
@@ -275,7 +275,12 @@ class CurveNet(nn.Module):
         # So the knot path now bypasses the trunk completely. Content still drives the
         # LOCAL head below, which is exactly the LLF-LUT split: global tone from the
         # display, local detail from the image.
-        raw = self.ctx_head(ctx[:, :13])                  # [B,9] -- display scalars only
+        # 1.1.0: ctx[0] and ctx[1] are the frame's mean and p99.99 luminance -- they are
+        # CONTENT, not display. The true display block is ctx[2:13] (peak, full-frame, min,
+        # paper white, HDR flag, three output-device flags, gamut, bias, intensity).
+        # Slicing [:13] left two content channels in the curve path, which is why the
+        # engine still read 0.178 where the offline probe read 0.174.
+        raw = self.ctx_head(ctx[:, 2:13])                 # [B,9] -- display scalars only
         knots = self.curve(raw)                           # [B,8]
 
         # ---- local strengths ---------------------------------------------------
