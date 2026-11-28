@@ -91,6 +91,7 @@ float NTMOColorCorrectionHighlightsMax;
 // ---- Display -------------------------------------------------------------
 float NTMOMinNits;
 float NTMOMaxNits;
+float NTMOHDRMidGreyNits;
 float NTMOMaxFullFrameNits;
 float NTMOPaperWhiteNits;
 
@@ -198,6 +199,14 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 				NTMOMaxNits,
 				NTMOMinNits);
 		}
+	}
+
+	if (NTMOHDRMidGreyNits > 0.0f)
+	{
+		Mapped = NTMO_AnchorHDRMidGrey(
+			Mapped, K, NTMOHDRMidGreyNits,
+			max(NTMOMaxNits * 0.01f, 1.0e-4f),
+			max(NTMOMinNits * 0.01f, 1.0e-6f));
 	}
 
 	// LINEAR display values, deliberately NOT encoded.

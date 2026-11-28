@@ -1,6 +1,7 @@
 // Copyright (c) 2026. All Rights Reserved.
 
 #include "NTMORenderer.h"
+#include "Async/Async.h"
 
 // The exported renderer symbol below uses RDG and scene-view types, so establish
 // their declarations before redeclaring it.
@@ -187,6 +188,7 @@ public:
 		SHADER_PARAMETER(float, NTMOBlackLift)
 		SHADER_PARAMETER(float, NTMOMinNits)
 		SHADER_PARAMETER(float, NTMOMaxNits)
+		SHADER_PARAMETER(float, NTMOHDRMidGreyNits)
 		SHADER_PARAMETER(float, NTMOMaxFullFrameNits)
 		SHADER_PARAMETER(float, NTMOPaperWhiteNits)
 		// Unreal's colour grading, ported. Unreal bakes all of this into the
@@ -265,6 +267,7 @@ public:
 		SHADER_PARAMETER(float, NTMOBloomScale)
 		SHADER_PARAMETER(int32, NTMOOutputDevice)
 		SHADER_PARAMETER(float, NTMOGamma)
+		SHADER_PARAMETER(float, NTMOOutputPeakLinear)
 		RENDER_TARGET_BINDING_SLOTS()
 	END_SHADER_PARAMETER_STRUCT()
 
@@ -768,6 +771,15 @@ FScreenPassTexture FNTMORenderer::AddPasses(
 		PassParameters->NTMOBlackLift = Curve.BlackLift;
 		PassParameters->NTMOMinNits = Ctx.MinLuminanceNits;
 		PassParameters->NTMOMaxNits = Ctx.MaxLuminanceNits;
+		PassParameters->NTMOHDRMidGreyNits = 0.0f;
+		if (Ctx.bHDREnabled != 0)
+		{
+			const IConsoleVariable* MidGreyCVar = IConsoleManager::Get().FindConsoleVariable(
+				TEXT("r.HDR.Display.MidLuminance"));
+			PassParameters->NTMOHDRMidGreyNits = MidGreyCVar != nullptr
+				? FMath::Clamp(MidGreyCVar->GetFloat(), 0.1f, (float)Ctx.MaxLuminanceNits)
+				: 15.0f;
+		}
 		PassParameters->NTMOMaxFullFrameNits = Ctx.MaxFullFrameLuminanceNits;
 		PassParameters->NTMOPaperWhiteNits = Ctx.PaperWhiteNits;
 
@@ -1271,7 +1283,7 @@ FScreenPassTexture FNTMORenderer::AddPasses(
 							}
 							KnotsReadback->Unlock();
 							KnotsReadback.Reset();
-							CVarNTMODumpKnots->Set(0, ECVF_SetByCode);
+							AsyncTask(ENamedThreads::GameThread, [] { CVarNTMODumpKnots->Set(0, ECVF_SetByCode); });
 						}
 						else if (!KnotsReadback.IsValid())
 						{
@@ -1417,6 +1429,9 @@ FScreenPassTexture FNTMORenderer::AddPasses(
 		PassParameters->NTMOBloomScale = Bloom.IsValid() ? CVarNTMOBloomScale.GetValueOnRenderThread() : 0.0f;
 		PassParameters->NTMOOutputDevice = OutputDeviceToShaderValue(Ctx.OutputDevice);
 		PassParameters->NTMOGamma = 1.0f / FMath::Max(CVarNTMOGamma.GetValueOnRenderThread(), 1.0f);
+		PassParameters->NTMOOutputPeakLinear = Ctx.bHDREnabled
+			? FMath::Clamp(Ctx.MaxLuminanceNits / 100.0f, 0.01f, 100.0f)
+			: 1.0f;
 		PassParameters->RenderTargets[0] = FRenderTargetBinding(Output.Texture, Output.LoadAction);
 
 		const FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(View.GetFeatureLevel());

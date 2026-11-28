@@ -145,7 +145,7 @@ public:
 	 * should be preferred; NNERuntimeORTDml needs one frame of pipelining.
 	 */
 	UPROPERTY(config, EditAnywhere, Category = "Neural", meta = (DisplayName = "NNE Runtime"))
-	FString NNERuntimeName = TEXT("NNERuntimeRDGHlsl");
+	FString NNERuntimeName = TEXT("NNERuntimeORTDml");
 
 	/**
 	 * Master intensity. 0 produces a near-neutral (ACES-like) look which is useful for

@@ -66,6 +66,7 @@ float NTMOLutOffset;	// 0.5 / Size
 float NTMOBloomScale;
 int NTMOOutputDevice;
 float NTMOGamma;
+float NTMOOutputPeakLinear;
 
 
 /** Cheap triangular dither, keeps SDR gradients from banding after quantisation. */
@@ -159,7 +160,9 @@ void MainPS(
 		Mapped *= exp2(LocalCorrection.y);
 	}
 
-	Mapped = saturate(Mapped);
+	// HDR uses 1.0 == 100 nits, so a generic saturate here destroyed highlights
+	// before PQ/scRGB encoding. Keep HDR headroom and cap only to the display peak.
+	Mapped = min(max(Mapped, 0.0f), NTMOOutputPeakLinear);
 
 	// Output transfer function, applied last so the correction above stayed linear.
 	float3 Encoded = NTMO_EncodeOutput(Mapped, NTMOOutputDevice, NTMOGamma);

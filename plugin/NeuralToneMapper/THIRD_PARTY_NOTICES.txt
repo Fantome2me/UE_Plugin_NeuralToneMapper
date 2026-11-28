@@ -1,0 +1,9 @@
+HDR+ dataset attribution
+
+The NTMO_M_v14 local-parameter head was supervised using a 480p derivative of paired HDR+ merged-image inputs and final JPEG outputs. The dataset is attributed to:
+
+Samuel W. Hasinoff, Dillon Sharlet, Ryan Geiss, Andrew Adams, Jonathan T. Barron, Florian Kainz, Jiawen Chen, and Marc Levoy, "Burst photography for high dynamic range and low-light imaging on mobile cameras," ACM Transactions on Graphics (SIGGRAPH Asia 2016), 35(6).
+
+The HDR+ dataset page states that the dataset is released under the Creative Commons Attribution-ShareAlike (CC BY-SA) license. The source images are not included in this plugin package. The v14 weights were trained from the user's local copy of the 480p derivative; downstream redistribution of those weights should preserve this attribution and review the applicable license terms.
+
+The HDR+ dataset's official description identifies its final output as a JPEG generated from the merged result by the finishing pipeline. Dataset page: https://hdrplusdata.org/dataset.html

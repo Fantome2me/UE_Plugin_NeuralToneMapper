@@ -272,6 +272,46 @@ void NTMO_ReshapeCurve(
 	K.K23 = float4(Out[4], Out[5], Out[6], Out[7]);
 }
 
+/** Anchor HDR 18% scene gray to the display's configured diffuse-gray level. */
+float3 NTMO_AnchorHDRMidGrey(
+	float3 Color,
+	FNTMOKnots K,
+	float MidGreyNits,
+	float PeakLinear,
+	float FloorLinear)
+{
+	if (MidGreyNits <= 0.0f)
+	{
+		return Color;
+	}
+
+	const float Lum = dot(max(Color, 0.0f), float3(0.2126f, 0.7152f, 0.0722f));
+	if (Lum <= 1.0e-8f)
+	{
+		return Color;
+	}
+
+	const float LogFloor = log2(max(FloorLinear, 1.0e-8f));
+	const float LogPeak = log2(max(PeakLinear, FloorLinear + 1.0e-6f));
+	const float RawMid = clamp(NTMO_EvalCurveLog2(log2(0.18f), K), LogFloor, LogPeak);
+	const float TargetMid = clamp(log2(max(MidGreyNits * 0.01f, FloorLinear)), LogFloor, LogPeak);
+	const float LogLum = clamp(log2(Lum), LogFloor, LogPeak);
+
+	float AnchoredLogLum;
+	if (LogLum <= RawMid)
+	{
+		const float T = saturate((LogLum - LogFloor) / max(RawMid - LogFloor, 1.0e-4f));
+		AnchoredLogLum = lerp(LogFloor, TargetMid, T);
+	}
+	else
+	{
+		const float T = saturate((LogLum - RawMid) / max(LogPeak - RawMid, 1.0e-4f));
+		AnchoredLogLum = lerp(TargetMid, LogPeak, T);
+	}
+
+	return Color * exp2(AnchoredLogLum - LogLum);
+}
+
 // ---------------------------------------------------------------------------
 // Chroma compensation - trade lightness for colour instead of losing both.
 // ---------------------------------------------------------------------------

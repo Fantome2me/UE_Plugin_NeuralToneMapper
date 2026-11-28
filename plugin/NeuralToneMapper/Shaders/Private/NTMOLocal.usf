@@ -338,7 +338,12 @@ void MainCS_BlendKnots(uint3 DispatchThreadId : SV_DispatchThreadID)
 		return;
 	}
 
-	const float Prev = NTMOPrevKnots[i];
 	const float New = NTMONewKnots[i];
-	RWNTMOSmoothedKnots[i] = lerp(Prev, New, saturate(NTMOBlendAlpha));
+	RWNTMOSmoothedKnots[i] = NTMOBlendAlpha >= 1.0f ? New : lerp(NTMOPrevKnots[i], New, saturate(NTMOBlendAlpha));
+	// Only the curve is smoothed, but the downstream operator consumes all 72 values.
+	[unroll] for (uint block = 0u; block < 8u; ++block)
+	{
+		const uint tileBand = 8u + block * 8u + i;
+		RWNTMOSmoothedKnots[tileBand] = NTMONewKnots[tileBand];
+	}
 }
