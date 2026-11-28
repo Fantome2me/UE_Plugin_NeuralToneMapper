@@ -43,7 +43,7 @@ void FNeuralToneMapperModule::StartupModule()
 	}
 	else
 	{
-		PostEngineInitHandle = FCoreDelegates::OnPostEngineInit.AddRaw(
+		PostEngineInitHandle = FCoreDelegates::GetOnPostEngineInit().AddRaw(
 			this, &FNeuralToneMapperModule::CreateViewExtensionIfNeeded);
 	}
 
@@ -80,7 +80,7 @@ void FNeuralToneMapperModule::ShutdownModule()
 {
 	if (PostEngineInitHandle.IsValid())
 	{
-		FCoreDelegates::OnPostEngineInit.Remove(PostEngineInitHandle);
+		FCoreDelegates::GetOnPostEngineInit().Remove(PostEngineInitHandle);
 		PostEngineInitHandle.Reset();
 	}
 
