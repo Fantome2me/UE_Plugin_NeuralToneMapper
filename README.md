@@ -575,6 +575,23 @@ v8b 只有 1.37 MB 是因为没带优化器状态（冻结主干训练时没保�
 
 ---
 
+### 9.4 1.1.7 的 SDR 验收（同一物体的六个机位）
+
+场景 `Lvl_ThirdPerson`，验收资产 `SM_Item_TuDiMiao_02`，800×450 固定时间步。
+0–3 号机位训练，4 号选权重，5 号独立验收。中央裁切 x∈[285,515)、y∈[150,300)，
+按原生图加权码值亮度 5..40 选出 7074 个暗部像素。
+
+| 指标 | 原生 UE | 1.1.6 | 1.1.7 |
+|---|---|---|---|
+| 暗部中位数（码值） | 16.99 | 12.76 | **19.00** |
+| 暗部亮度 MAE | 0 | 4.31 | **2.05** |
+| 四暗阶中位数 | 8.5 / 16.8 / 24.3 / 32.8 | 5.1 / 12.6 / 19.6 / 27.0 | 9.8 / 18.8 / 26.0 / 32.8 |
+| 去均值后颜色分量 MAE | — | 5.28 | **1.98** |
+| 原始 RGB MAE | — | **9.98** | 10.11 |
+
+读法：1.1.7 把 1.1.6 偏暗的暗部拉了回来（中位数 12.76 → 19.00），颜色分量误差降到 1.98；
+但**整体 RGB MAE 略差于 1.1.6**，说明它不是全面提升，而是在暗部与色偏之间做了取舍。
+
 ## 十、安装与使用
 
 ### 安装
@@ -603,14 +620,25 @@ v8b 只有 1.37 MB 是因为没带优化器状态（冻结主干训练时没保�
 | 设置 | 默认 | 说明 |
 |---|---|---|
 | `Curve Source` | Neural | Analytic = 解析曲线（不用 AI） |
-| `Curve Model File` | （空） | 空 = 自动定位插件内最新模型 |
-| `Saturation` | 1.08 | 饱和度 |
-| `Highlight Desaturation` | 0.05 | 高光去饱和 |
+| `Curve Model File` | （空） | 空 = 自动定位插件内版本号最大的模型 |
+| `Intensity` | 1.00 | 总强度；同时决定 LLF 通路的混合权重，0 = 完全退回旧路径 |
+| `Saturation` | 1.00 | 饱和度（**1.1.0 起中性**，旧版默认是 1.08） |
+| `Highlight Desaturation` | 0.00 | 高光去饱和（**1.1.0 起中性**，旧版默认是 0.05） |
+| `Black Lift` | 0.00 | 黑位抬升 |
+| `Chroma Compensation` | 0.00 | 色度补偿（1.0.7 的旧默认是 0.25） |
+| `Mid-Grey Anchor (stops)` | 0.00 | 曲线重塑；模型已学对后归零 |
+| `Peak Fill` | 0.00 | 曲线重塑；同上 |
+| `Shadow Boost` | 3.0 | 阴影抬升增益 |
+| `Match Unreal Gamut Expansion` | **true** | 保留 UE 曲线之前的 ExpandGamut（1.1.2 起真正生效） |
+| `Match Unreal Colour Grading` | false | 复现后处理体积调色；会带色相偏移，默认关 |
+| `Match Unreal Hue Behaviour` | false | 逐通道曲线 + 蓝色修正 |
 | `Local Detail Mix` | 0.25 | 局部细节强度 |
 | `Local Exposure Scale` | 0.5 | 局部曝光强度（暗区提亮） |
 | `Local Gain Clamp Stops` | 1.5 | 局部校正硬上限 |
 | `Curve Smoothing Half-Life` | 0.15 s | 曲线时域平滑 |
 | `Inference Interval` | 4 | 每 N 帧推理一次 |
+| `LUT Size` | 33 | 3D LUT 边长 |
+| `NNERuntime Name` | `NNERuntimeORTDml` | **1.1.4 起**。SM6 下 RDGHlsl 导入模型会访问冲突 |
 
 ---
 
@@ -625,9 +653,24 @@ v8b 只有 1.37 MB 是因为没带优化器状态（冻结主干训练时没保�
    换场景仍可能有 ±0.1 档偏差。
 3. **局部校正没有时域累积**，只有曲线有 EMA。极端内容切换时局部校正可能有轻微跳变。
 4. **替换而非叠加** UE 的 Local Exposure（后者在被替换的 pass 内部）。
-5. **VignetteMask 按 1 处理**，未做完整暗角等价。
+5. **VignetteMask 按 1 处理**，未做完整暗角等价；胶片颗粒未实现。
 6. **每个进程只加载一次模型**，换 `.onnx` 需重启编辑器。
 7. **只在 RTX 5060 Ti + Windows + D3D12 + UE 5.8 上验证过**，其他组合理论上可行但未实测。
+
+### 1.1.5 之后新增的限制
+
+8. **LLF 图像网络的训练域是 HDR+ 手机照片**（675/13/234，160×96），与 UE 渲染帧不是同一分布。
+   1.1.7 的解码器用 UE 原生截图做标签，但**底层 LLF 主干仍然是照片域权重**。
+9. **1.1.7 的验收是同一物体的六个机位**（0–3 训练 / 4 选权重 / 5 验收），
+   不是跨场景测试。换场景、换材质、换时段都可能退化。
+10. **没有长期时序验收**。LLF 通路没有视频时序监督，动态昼夜与镜头运动下的闪烁未测。
+11. **物理 HDR 未验收**。StarSky 请求 `-hdr` 时 UE 实际报告 HDR 0 / outdev 0；
+    仅在一个测试进程里强制 400 nit / PQ 元数据验证过通路执行，未测量面板亮度。
+12. **4K 帧耗未测**。所有实测都在 800×450，LLF 通路的代价随分辨率上升，没有数据。
+13. **1.1.7 的原始 RGB MAE 没有全面优于 1.1.6**（9.98 → 10.11）。它赢的是暗部与颜色分量，
+    不是整体像素误差。
+14. **模块启动日志里的「1.1.5」是早期 LLF 内核的版本**，不是插件描述符版本。
+    1.1.6 / 1.1.7 是 shader-only 更新，沿用了已编译的 DLL。
 
 ---
 
@@ -635,10 +678,34 @@ v8b 只有 1.37 MB 是因为没带优化器状态（冻结主干训练时没保�
 
 | 版本 | 关键内容 | 文档 |
 |---|---|---|
-| **1.0.4** | 修复 RDG 资源顺序错误（统计缓冲区读到未写入纹理，污染网络 32 个输入通道） | [notes](docs/RELEASE_NOTES_1.0.4.md) |
+| **1.1.7** | 有界 LDR 解码器：AI 重新参与最终 SDR 输出，但经 ±0.18 档限制的黑位保护解码 | [`CHANGELOG.md`](CHANGELOG.md) |
+| 1.1.6 | 收回 AI 对最终 RGB 的完全接管，重建只作为条件参与后续滤波 | [`CHANGELOG.md`](CHANGELOG.md) |
+| 1.1.5 | 把训练的 LocalLUT 图像模型移植进 RDG 计算着色器（`r.NTMO.LLF`） | [`CHANGELOG.md`](CHANGELOG.md) |
+| 1.1.4 | HDR 峰值限幅与中灰锚定、v14 局部头、曲线平滑缓冲区热修 | [`CHANGELOG.md`](CHANGELOG.md) |
+| 1.1.3 | v13 曲线头：放开黑位范围，用配对 PQ/scRGB 上下文校准 | [`CHANGELOG.md`](CHANGELOG.md) |
+| 1.1.2 | 把 gamut expansion 真正写进源码（1.1.1 只是在文档里宣布了这件事） | [`CHANGELOG.md`](CHANGELOG.md) |
+| 1.1.1 | 拆分 ExpandGamut 与调色的开关、契约审计脚本（**代码改动实际落在 1.1.2**） | [`CHANGELOG.md`](CHANGELOG.md) |
+| 1.1.0 | 全量复查：5 处代码问题 + 2 处模型问题，曲线高光端过冲修正 | [`CHANGELOG.md`](CHANGELOG.md) |
+| 1.0.10 | 局部头学会在暗区抬细节，band 1/2 结构性零均值 | [`CHANGELOG.md`](CHANGELOG.md) |
+| 1.0.9 | 曲线改为显示参数直通，重训并实测对齐 UE 自己的 filmic | [`CHANGELOG.md`](CHANGELOG.md) |
+| 1.0.8 | 「只做色调」：关掉整套调色，同时误关了 ExpandGamut | [`CHANGELOG.md`](CHANGELOG.md) |
+| 1.0.7 | 曲线重塑（中灰锚定 / 峰值填充 / 阴影增益 / 色度补偿） | [`CHANGELOG.md`](CHANGELOG.md) |
+| 1.0.6 | 对齐 UE 的逐通道色相行为与蓝色修正 | [`CHANGELOG.md`](CHANGELOG.md) |
+| 1.0.5 | 补回被 tonemapper 替换跳过的 UE 调色链 | [`CHANGELOG.md`](CHANGELOG.md) |
+| 1.0.4 | 修复 RDG 资源顺序错误（统计缓冲区读到未写入纹理，污染网络 32 个输入通道） | [notes](docs/RELEASE_NOTES_1.0.4.md) |
 | 1.0.3 | 修正"效果反了"：混合域校正、局部曝光 DC 通道、G1 参考、冻结主干训练 | [notes](docs/RELEASE_NOTES_1.0.3.md) |
 | 1.0.2 | 补齐论文的局部 AI：边缘条件输入、48 个学习局部参数、Durand 分解重写局部算子 | [notes](docs/RELEASE_NOTES_1.0.2.md) |
 | 1.0.1 | 首个可用版本：修复致命 PSO 错误、曝光链、HDR/EDID 自适应、同机位 A/B 验证 | [notes](docs/RELEASE_NOTES_1.0.1.md) |
+
+每个版本号都有对应的 git tag（`v1.0.1` … `v1.1.7`）和 GitHub Release，Release 附件是该版本的
+Win64 安装包。同一版本号若同时存在普通包与热修包，仓库与 Release 采用**热修版**
+（1.1.4 与 1.1.7 属于这种情况）。
+
+> **一处历史更正（保留在案）**：1.1.1 的 CHANGELOG 曾声称已经把 gamut expansion 与
+> color grading 拆成两个开关，但那次提交只改了 CHANGELOG、审计脚本、ini 和 uplugin，
+> 没有碰 `NTMOSettings.h` / `NTMORenderer.cpp`。ini 里的 `bMatchUnrealGamutExpansion`
+> 在当时是一个无人读取的死键。真正的代码改动落在 **1.1.2**。这条记录保留下来，
+> 是因为它说明了一件事：**版本号和文档不能当作代码已经生效的证据。**
 
 完整的调试过程（包括每个致命错误的根因分析）见 [`docs/技术说明.md`](docs/技术说明.md)。
 
