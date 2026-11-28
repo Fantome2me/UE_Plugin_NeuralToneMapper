@@ -93,6 +93,18 @@ int NTMOApplyExposure;
 Texture2D LLFImage;
 float4 LLFRect;
 float LLFMix;
+#include "NTMO117Weights.ush"
+float3 NTMO117Decode(float3 scene, float3 reconstruction)
+{
+    float3 x=sqrt(saturate(scene/(1+scene)));float3 f=saturate(reconstruction);
+    float3 y=x+float3(N117OB[0],N117OB[1],N117OB[2]);
+    [unroll] for(int j=0;j<24;j++){
+        float h=N117HB[j];[unroll] for(int c=0;c<3;c++)h+=x[c]*N117H[6*j+c]+f[c]*N117H[6*j+3+c];
+        y+=max(h,0)*float3(N117O[j],N117O[24+j],N117O[48+j]);
+    }
+    float3 code=saturate(y*saturate(max(x.r,max(x.g,x.b))*128));
+    return lerp(code/12.92,pow((code+.055)/1.055,2.4),step(.04045,code));
+}
 
 // INPUT SIGNATURE MUST MATCH ScreenPass.usf
 // -----------------------------------------
@@ -167,10 +179,15 @@ void MainPS(
 	// before PQ/scRGB encoding. Keep HDR headroom and cap only to the display peak.
 	Mapped = min(max(Mapped, 0.0f), NTMOOutputPeakLinear);
 	if (LLFMix > 0) {
-		float stops=LLFImage.SampleLevel(NTMOLocalCorrectionSampler,(SvPosition.xy-LLFRect.xy)*LLFRect.zw,0).a;
+		float4 reconstruction=LLFImage.SampleLevel(NTMOLocalCorrectionSampler,(SvPosition.xy-LLFRect.xy)*LLFRect.zw,0);
+		if(NTMOOutputDevice!=NTMO_OUTPUT_PQ && NTMOOutputDevice!=NTMO_OUTPUT_SCRGB){
+			Mapped=lerp(Mapped,NTMO117Decode(LinearColor,reconstruction.rgb),LLFMix);
+		}else{
+		float stops=reconstruction.a;
 		float peakFraction=max(Mapped.r,max(Mapped.g,Mapped.b))/NTMOOutputPeakLinear;
 		float guard=smoothstep(.001,.015,peakFraction)*(1-smoothstep(.45,.85,peakFraction));
 		Mapped*=exp2(clamp(stops,-.18,.18)*guard*LLFMix);
+		}
 	}
 
 	// Output transfer function, applied last so the correction above stayed linear.
