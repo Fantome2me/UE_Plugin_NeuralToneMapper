@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
-	"Version": 116,
-	"VersionName": "1.1.5",
+	"Version": 117,
+	"VersionName": "1.1.6",
 	"FriendlyName": "Neural Tone Mapper (AI 动态色调映射)",
 	"Description": "Replaces Unreal Engine's built-in tone mapping with a LUT-backed tone mapper. A compact NNE neural network predicts the global tone curve from display context and local Laplacian parameters from scene statistics. Supports SDR, Rec.709, PQ (ST.2084) and scRGB output. Toggled from the editor's Build menu or with r.NTMO.Enable.",
 	"Category": "Rendering",

@@ -43,10 +43,18 @@ float3 Lookup(int table,float3 rgb){
  [loop]for(int o=0;o<16;o++){float v=Weights[W_attend_in_proj_bias+o];[unroll]for(int i=0;i<16;i++)v+=e[i]*Weights[W_attend_in_proj_weight+o*16+i];qv[o]=v;att[o]=0;}
  [unroll]for(int h=0;h<2;h++){float m=-1e20,den=0;[loop]for(int t=0;t<64;t++){float dotv=0;[unroll]for(int d=0;d<8;d++)dotv+=qv[h*8+d]*KV[t*32+h*8+d];float s=dotv*.35355339,nm=max(s,m),a=exp(m-nm),b=exp(s-nm);den=den*a+b;[unroll]for(int d=0;d<8;d++)att[h*8+d]=att[h*8+d]*a+b*KV[t*32+16+h*8+d];m=nm;}[unroll]for(int d=0;d<8;d++)att[h*8+d]/=den;}
  float3 w=0;[loop]for(int o=0;o<16;o++){float v=e[o]+Weights[W_attend_out_proj_bias+o];[unroll]for(int i=0;i<16;i++)v+=att[i]*Weights[W_attend_out_proj_weight+o*16+i];[unroll]for(int c=0;c<3;c++)w[c]+=v*Weights[W_weights_weight+c*16+o];}
- [unroll]for(int c=0;c<3;c++)w[c]+=Weights[W_weights_bias+c];w=exp(w-max(w.x,max(w.y,w.z)));w/=dot(w,1);float3 src=ReadA(p);ImageOut[p]=float4(w.x*Lookup(0,src)+w.y*Lookup(1,src)+w.z*Lookup(2,src),1);
+ [unroll]for(int c=0;c<3;c++)w[c]+=Weights[W_weights_bias+c];w=exp(w-max(w.x,max(w.y,w.z)));w/=dot(w,1);float3 src=ReadA(p);ImageOut[p]=float4(w.x*Lookup(0,src)+w.y*Lookup(1,src)+w.z*Lookup(2,src),0);
 #elif STAGE==5
  float vals[63];[unroll]for(int j=0;j<9;j++){int2 q=p+int2(j%3,j/3)-1;bool ok=all(q>=0)&&all(q<Size);float3 s=ReadA(q),y=C.SampleLevel(Bi,(q+.5)/Size,0).rgb;float edge=dot(abs(Band(q)),1./3.);[unroll]for(int c=0;c<3;c++){vals[c*9+j]=ok?s[c]:0;vals[(c+3)*9+j]=ok?y[c]:0;}vals[54+j]=ok?edge:0;}
  float2 par=float2(Weights[W_detail_2_bias],Weights[W_detail_2_bias+1]);[loop]for(int o=0;o<12;o++){float v=Weights[W_detail_0_bias+o];[unroll]for(int i=0;i<63;i++)v+=vals[i]*Weights[W_detail_0_weight+o*63+i];par+=max(v,0)*float2(Weights[W_detail_2_weight+o],Weights[W_detail_2_weight+12+o]);}
- float3 band=Band(p);float sigma=.002+.2/(1+exp(-par.y));ImageOut[p]=float4(C.SampleLevel(Bi,uv,0).rgb+band*(1+.9*tanh(par.x)*exp(-dot(abs(band),1./3.)/sigma)),1);
+ float3 band=Band(p);float sigma=.002+.2/(1+exp(-par.y));
+ float learned=.9*tanh(par.x)*exp(-dot(abs(band),1./3.)/sigma);
+ float4 parent=C.SampleLevel(Bi,uv,0);
+ // RGB conditions the next learned filter. Alpha carries only the learned part
+ // of the band, relative to local luminance; a uniform field contributes zero.
+ const float3 lum=float3(.2126,.7152,.0722);
+ float contrast=dot(band,lum)/max(dot(ReadA(p),lum),.025);
+ float delta=learned*clamp(contrast,-.5,.5)*(1-smoothstep(.25,1.,abs(contrast)));
+ ImageOut[p]=float4(parent.rgb+band*(1+learned),clamp(parent.a+delta,-.18,.18));
 #endif
 }
