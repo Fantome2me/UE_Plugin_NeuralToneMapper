@@ -1,3 +1,25 @@
+## 1.1.2 — 把 ExpandGamut 真正落进源码
+
+### 背景（必须记录的一次文档与代码不符）
+1.1.1 的 CHANGELOG 声称已经把 gamut expansion 与 color grading 拆成两个开关，
+但仓库里的 C++ **从未包含这个改动**：`8c37e76` 只改了 CHANGELOG、审计脚本、ini 和 uplugin，
+没有碰 `NTMOSettings.h` / `NTMORenderer.cpp`。ini 里的 `bMatchUnrealGamutExpansion`
+是一个没有任何代码读取的死键，因此 1.1.1 的默认输出仍然把 `NTMOExpandGamut` 设为 0。
+
+### 本版
+- 新增 `bMatchUnrealGamutExpansion`（默认 `true`）与 `r.NTMO.GamutExpand`
+  （`-1` 跟随设置 / `0` 关 / `1` 开）。
+- `NTMOExpandGamut` 的赋值移出 `if (bGrading)` 分支。`r.NTMO.Grading 0` 只关调色，
+  不再连带关闭色域扩展。
+- 补齐 5 个 include（RenderGraphResources / ThreadSafeBool / SceneView / ModuleManager /
+  RHIGPUReadback），使插件可以独立跑 `BuildPlugin`。
+- 新增 `Config/FilterPlugin.ini`，发布包可携带额外文件。
+- 发布包内含已编译的 Editor DLL，可开箱安装。
+
+### 说明
+本版不改模型、不改着色器数学、不改曲线默认值。行为差异只有一处：
+`bMatchUnrealColorGrading=false` 时 ExpandGamut 仍然生效，画面饱和度与高亮色域回到 UE 水平。
+
 ## 1.1.1 — "画面还是平"：找回被一起关掉的 ExpandGamut
 
 ### 根因

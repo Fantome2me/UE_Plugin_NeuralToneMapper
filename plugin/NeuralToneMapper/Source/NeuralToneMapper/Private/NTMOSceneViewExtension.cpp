@@ -8,6 +8,7 @@
 
 #include "PostProcess/PostProcessMaterialInputs.h"
 #include "RenderGraphBuilder.h"
+#include "SceneView.h"
 #include "ScreenPass.h"
 
 FNTMOSceneViewExtension::FNTMOSceneViewExtension(const FAutoRegister& AutoRegister)

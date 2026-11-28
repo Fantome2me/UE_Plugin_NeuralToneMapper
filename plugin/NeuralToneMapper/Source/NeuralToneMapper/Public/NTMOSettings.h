@@ -205,6 +205,10 @@ public:
 	UPROPERTY(config, EditAnywhere, Category = "Look", meta = (DisplayName = "Match Unreal Colour Grading"))
 	bool bMatchUnrealColorGrading = false;
 
+	/** Keep Unreal's pre-tonemap ExpandGamut step without enabling post-process grading. */
+	UPROPERTY(config, EditAnywhere, Category = "Look", meta = (DisplayName = "Match Unreal Gamut Expansion"))
+	bool bMatchUnrealGamutExpansion = true;
+
 	/**
 	 * Match Unreal's HUE behaviour as well as its grading.
 	 *

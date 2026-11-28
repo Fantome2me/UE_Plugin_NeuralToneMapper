@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "HAL/ThreadSafeBool.h"
+#include "RenderGraphResources.h"
 #include "NTMOPolicy.h"
 #include "NTMOTypes.h"
 

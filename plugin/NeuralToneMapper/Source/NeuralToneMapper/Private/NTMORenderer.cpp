@@ -2,6 +2,9 @@
 
 #include "NTMORenderer.h"
 
+// The exported renderer symbol below uses RDG and scene-view types, so establish
+// their declarations before redeclaring it.
+
 // Declared in Runtime/Renderer/Private/SceneTextureParameters.h, which a plugin cannot
 // include. The symbol is exported (RENDERER_API) so an exact re-declaration links. This
 // is the same buffer Unreal's tonemapper reads for GlobalExposure. A signature change in
@@ -15,6 +18,7 @@ extern RENDERER_API FRDGBufferRef GetEyeAdaptationBuffer(FRDGBuilder& GraphBuild
 #include "HAL/IConsoleManager.h"
 #include "PixelShaderUtils.h"
 #include "PostProcess/PostProcessMaterialInputs.h"
+#include "RHIGPUReadback.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "SceneView.h"
@@ -62,8 +66,13 @@ static TAutoConsoleVariable<int32> CVarNTMOGamutCompressPercent(
 static TAutoConsoleVariable<int32> CVarNTMOGrading(
 	TEXT("r.NTMO.Grading"),
 	-1,
-	TEXT("Reproduce Unreal's colour grading (ExpandGamut + color correct) in the LUT bake.\n")
-	TEXT("-1: follow the project setting (default), 0: force off (pre-1.0.5 look), 1: force on"),
+	TEXT("Reproduce Unreal's colour grading (excluding independent ExpandGamut) in the LUT bake.\n")
+	TEXT("-1: follow the project setting (default), 0: force off, 1: force on"),
+	ECVF_RenderThreadSafe);
+static TAutoConsoleVariable<int32> CVarNTMOGamutExpand(
+	TEXT("r.NTMO.GamutExpand"),
+	-1,
+	TEXT("Unreal ExpandGamut: -1 follows bMatchUnrealGamutExpansion, 0 = off, 1 = on."),
 	ECVF_RenderThreadSafe);
 // Same idea as r.NTMO.Grading: -1 follows the setting so shipping behaviour is fixed.
 static TAutoConsoleVariable<int32> CVarNTMOHue(
@@ -783,6 +792,11 @@ FScreenPassTexture FNTMORenderer::AddPasses(
 			const bool bGrading = (GradingCVar < 0)
 				? GetDefault<UNTMOSettings>()->bMatchUnrealColorGrading
 				: (GradingCVar != 0);
+			const int32 GamutCVar = CVarNTMOGamutExpand.GetValueOnRenderThread();
+			const bool bExpandGamut = (GamutCVar < 0)
+				? GetDefault<UNTMOSettings>()->bMatchUnrealGamutExpansion
+				: (GamutCVar != 0);
+			PassParameters->NTMOExpandGamut = bExpandGamut ? PP.ExpandGamut : 0.0f;
 
 			auto ToV4f = [](const FVector4& V)
 			{
@@ -791,7 +805,6 @@ FScreenPassTexture FNTMORenderer::AddPasses(
 
 			if (bGrading)
 			{
-				PassParameters->NTMOExpandGamut = PP.ExpandGamut;
 				PassParameters->NTMOToAP1 = GNTMOToAP1;
 				PassParameters->NTMOFromAP1 = GNTMOFromAP1;
 				PassParameters->NTMOExpandMat = GNTMOExpandMat;
@@ -836,7 +849,6 @@ FScreenPassTexture FNTMORenderer::AddPasses(
 			{
 				// Identity: no gamut expansion, no grading. Used to A/B against the look
 				// the plugin produced before 1.0.5.
-				PassParameters->NTMOExpandGamut = 0.0f;
 				PassParameters->NTMOToAP1 = GNTMOToAP1;
 				PassParameters->NTMOFromAP1 = GNTMOFromAP1;
 				PassParameters->NTMOExpandMat = GNTMOExpandMat;

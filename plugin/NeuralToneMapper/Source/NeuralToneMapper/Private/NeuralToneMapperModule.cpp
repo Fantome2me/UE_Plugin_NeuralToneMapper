@@ -9,6 +9,7 @@
 #include "Interfaces/IPluginManager.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/Paths.h"
+#include "Modules/ModuleManager.h"
 #include "RenderCore.h"
 #include "SceneViewExtension.h"
 #include "ShaderCore.h"
