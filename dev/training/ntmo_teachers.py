@@ -122,28 +122,46 @@ def op_analytic_policy(x, log_peak, log_floor=-10.0, knee_shift=0.0, toe_lift=0.
 # ---------------------------------------------------------------------------
 # Registry: teacher -> callable(hdr_linear, ctx) -> display linear
 # ---------------------------------------------------------------------------
-def _finalize(y_norm, ctx):
-    """Map a [0,1] display-referred value onto the panel's real linear range."""
+def _finalize(y_norm, ctx, mid_grey_norm=0.18):
+    """Map labels to display linear, keeping HDR diffuse gray independent of peak."""
     peak_linear = max(ctx["peak_nits"], 50.0) / LINEAR_TO_NITS
     floor_linear = max(ctx["min_nits"], 1e-5) / LINEAR_TO_NITS
-    return np.clip(y_norm * peak_linear, floor_linear, peak_linear)
+    y = np.clip(np.asarray(y_norm, dtype=np.float64) * peak_linear,
+                floor_linear, peak_linear)
+    if not ctx.get("is_hdr", 0):
+        return y
+
+    target = np.clip(ctx.get("mid_grey_nits", 15.0) / LINEAR_TO_NITS,
+                     floor_linear, peak_linear)
+    raw_mid = np.clip(float(mid_grey_norm) * peak_linear, floor_linear, peak_linear)
+    log_floor, log_peak = np.log2(floor_linear), np.log2(peak_linear)
+    log_raw_mid, log_target = np.log2(raw_mid), np.log2(target)
+    log_y = np.log2(np.maximum(y, floor_linear))
+    below = log_y <= log_raw_mid
+    t_low = np.clip((log_y - log_floor) / max(log_raw_mid - log_floor, 1e-8), 0.0, 1.0)
+    t_high = np.clip((log_y - log_raw_mid) / max(log_peak - log_raw_mid, 1e-8), 0.0, 1.0)
+    anchored = np.where(below,
+                        log_floor + t_low * (log_target - log_floor),
+                        log_target + t_high * (log_peak - log_target))
+    return np.clip(np.exp2(anchored), floor_linear, peak_linear)
 
 
 def _teacher_clip(x, ctx):
-    return _finalize(op_clip(x), ctx)
+    return _finalize(op_clip(x), ctx, op_clip(0.18))
 
 
 def _teacher_reinhard(x, ctx):
-    return _finalize(op_reinhard(x, white=ctx.get("reinhard_white", 4.0)), ctx)
+    white = ctx.get("reinhard_white", 4.0)
+    return _finalize(op_reinhard(x, white=white), ctx, op_reinhard(0.18, white=white))
 
 
 def _teacher_hable(x, ctx):
-    return _finalize(op_hable(x), ctx)
+    return _finalize(op_hable(x), ctx, op_hable(0.18))
 
 
 def _make_ue_filmic(name):
     def _f(x, ctx):
-        return _finalize(op_ue_filmic(x, name), ctx)
+        return _finalize(op_ue_filmic(x, name), ctx, op_ue_filmic(0.18, name))
     _f.__name__ = f"teacher_ue_filmic_{name}"
     return _f
 
@@ -154,7 +172,9 @@ def _teacher_analytic(x, ctx):
     abl = 1.0 - ctx["fullframe_nits"] / max(ctx["peak_nits"], 1.0)
     knee_shift = 2.5 * float(np.clip(abl, 0.0, 1.0)) * ctx.get("abl_awareness", 1.0)
     y = op_analytic_policy(x, log_peak, knee_shift=knee_shift)
-    return np.clip(y, ctx["min_nits"] / LINEAR_TO_NITS, ctx["peak_nits"] / LINEAR_TO_NITS)
+    raw_mid = float(op_analytic_policy(0.18, log_peak, knee_shift=knee_shift))
+    peak_linear = max(ctx["peak_nits"], 50.0) / LINEAR_TO_NITS
+    return _finalize(y / peak_linear, ctx, raw_mid / peak_linear)
 
 
 TEACHERS = {

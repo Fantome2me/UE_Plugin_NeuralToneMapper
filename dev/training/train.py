@@ -50,7 +50,7 @@ class ShardDataset(Dataset):
     _verify.py use), so the three stay consistent.
     """
 
-    def __init__(self, shards, train=True, seed=0, val_frac=0.05):
+    def __init__(self, shards, train=True, seed=0, val_frac=0.05, split=True):
         self.train = train
 
         sizes = []
@@ -61,7 +61,7 @@ class ShardDataset(Dataset):
 
         idx = np.random.default_rng(seed).permutation(n)
         n_val = max(1, int(n * val_frac))
-        wanted = idx[n_val:] if train else idx[:n_val]
+        wanted = (idx[n_val:] if train else idx[:n_val]) if split else np.arange(n)
         wanted.sort()          # ascending global index -> deterministic, cache-compatible
 
         offsets = np.cumsum([0] + sizes)
@@ -106,8 +106,8 @@ def collate(batch):
     return x.contiguous(memory_format=torch.channels_last), y
 
 
-def make_loader(shards, train, batch, workers):
-    ds = ShardDataset(shards, train=train)
+def make_loader(shards, train, batch, workers, split=True):
+    ds = ShardDataset(shards, train=train, split=split)
     return DataLoader(
         ds, batch_size=batch, shuffle=train, num_workers=workers,
         collate_fn=collate, pin_memory=True, drop_last=train,
@@ -159,18 +159,21 @@ def evaluate(model, loader, device, max_batches=40):
     model.train()
     local_err = local_tot / max(local_n, 1)
     if local_n:
-        print(f"[eval] local_param_l1={local_err:.4f}")
-    return tot / max(n, 1)
+        print(f"[eval] knot_l1={tot / max(n, 1):.4f} local_param_l1={local_err:.4f}")
+    return tot / max(n, 1) + LOCAL_W * local_err
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shards", required=True)
+    ap.add_argument("--val-shards", default="", help="optional dedicated validation shard folder")
     ap.add_argument("--out", required=True)
     ap.add_argument("--size", default="M", choices=["S", "M", "L"])
     ap.add_argument("--batch", type=int, default=512)
     ap.add_argument("--lr", type=float, default=0.0, help="0 = auto by batch size")
     ap.add_argument("--minutes", type=float, default=40.0)
+    ap.add_argument("--steps-per-second", type=float, default=60.0,
+                    help="scheduler estimate for this GPU/batch; measure from recent run logs")
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--resume", default="")
     ap.add_argument("--init-from", default="", help="warm-start weights only; fresh optimiser and LR schedule")
@@ -191,11 +194,15 @@ def main():
     print(f"[train] device={torch.cuda.get_device_name(0) if device.type=='cuda' else 'cpu'}", flush=True)
     print(f"[train] {len(shards)} shards", flush=True)
 
-    train_loader, n_train = make_loader(shards, True, args.batch, args.workers)
+    val_shards = sorted(glob.glob(os.path.join(args.val_shards, "shard_*.npz"))) if args.val_shards else shards
+    if args.val_shards and not val_shards:
+        raise SystemExit(f"no validation shards under {args.val_shards}")
+    dedicated_val = bool(args.val_shards)
+    train_loader, n_train = make_loader(shards, True, args.batch, args.workers, split=not dedicated_val)
     # Validation must honour --workers too. The old `max(2, workers // 2)` forced two
     # worker processes even at --workers 0, and under Windows spawn each one gets its
     # own pickled copy of the dataset -- 9 GB of extra resident memory for a 5% split.
-    val_loader, n_val = make_loader(shards, False, max(64, args.batch // 2), max(0, args.workers // 2))
+    val_loader, n_val = make_loader(val_shards, False, max(64, args.batch // 2), max(0, args.workers // 2), split=not dedicated_val)
     print(f"[train] train={n_train} val={n_val}", flush=True)
 
     model = build_model(args.size).to(device)
@@ -208,10 +215,9 @@ def main():
 
     steps_per_epoch = max(1, n_train // args.batch)
     # OneCycle needs a realistic total_steps. Under-estimating it decays the LR to
-    # ~0 long before the deadline, which manifests as a flat loss plateau while the
-    # GPU keeps churning. Measured ~12 it/s at batch 192 on a 5060 Ti (and ~20/s on an H20), so 12/s
-    # is a deliberate (slightly conservative) upper estimate.
-    est_steps_per_sec = 12.0
+    # Estimate scheduler length from the active GPU rather than assuming a fixed
+    # throughput; a stale estimate can decay the learning rate minutes too early.
+    est_steps_per_sec = max(float(args.steps_per_second), 1.0)
     total_steps = int(max(steps_per_epoch, args.minutes * 60.0 * est_steps_per_sec))
     sched = torch.optim.lr_scheduler.OneCycleLR(
         opt, max_lr=lr, total_steps=total_steps, pct_start=0.15, div_factor=10.0, final_div_factor=20.0)
@@ -313,10 +319,10 @@ def main():
         ep_loss = run / max(n_seen, 1)
         val = evaluate(model, val_loader, device)
         elapsed = (time.time() - t0) / 60.0
-        print(f"[train] === epoch {epoch} done | knot_l1={ep_loss:.4f} val={val:.4f} "
+        print(f"[train] === epoch {epoch} done | train_knot_l1={ep_loss:.4f} val_total={val:.4f} "
               f"| {elapsed:.1f} min", flush=True)
 
-        log.append({"epoch": epoch, "train_knot_l1": ep_loss, "val_knot_l1": val,
+        log.append({"epoch": epoch, "train_knot_l1": ep_loss, "val_total_loss": val,
                     "minutes": round(elapsed, 2), "steps": step})
 
         raw = model._orig_mod if hasattr(model, "_orig_mod") else model

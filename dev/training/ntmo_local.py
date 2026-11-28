@@ -171,6 +171,49 @@ def derive_local_params(hdr, knots, tiles=LOCAL_TILES):
     return (out / S_MAX).astype(np.float32).ravel()
 
 
+def derive_local_params_from_reference(hdr, reference_rgb, knots, tiles=LOCAL_TILES):
+    """Fit the actual runtime local correction to a paired display-linear reference."""
+    lum = hdr @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    ref_lum = reference_rgb @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    logy = np.log2(np.maximum(lum, 1e-7)).astype(np.float32)
+    ref_log = np.log2(np.maximum(ref_lum, 1e-5)).astype(np.float32)
+    H, W = logy.shape
+
+    G0, G1, _, G3 = pyramid(logy, 4)
+    G0u, G1u, G3u = (_up_to(g, (H, W)) for g in (G0, G1, G3))
+    mean_log = float(logy.mean())
+
+    target = ref_log - eval_curve(logy, knots)
+    detail_mix, strength_scale = 0.25, 1.5
+    terms = [
+        np.zeros_like(logy),
+        detail_mix * strength_scale * (G1u - G3u),
+        detail_mix * strength_scale * (G0u - G1u),
+    ]
+    max_shadow_stops = np.clip(mean_log - G1u, 0.0, EXPOSURE_CLAMP) * strength_scale * 0.5 * 3.0
+    terms.append(eval_curve(logy + max_shadow_stops, knots) - eval_curve(logy, knots))
+    out = np.zeros((tiles, tiles, LOCAL_BANDS), dtype=np.float32)
+    th, tw = max(1, H // tiles), max(1, W // tiles)
+    for ty in range(tiles):
+        for tx in range(tiles):
+            sl = (slice(ty * th, (ty + 1) * th), slice(tx * tw, (tx + 1) * tw))
+            A = np.stack([term[sl].ravel() for term in terms], axis=1)
+            y = target[sl].ravel()
+            if y.size < 8:
+                continue
+            M = A.T @ A
+            M += np.eye(LOCAL_BANDS, dtype=np.float32) * (1e-3 * max(np.trace(M) / LOCAL_BANDS, 1e-6))
+            try:
+                fit = np.linalg.solve(M, A.T @ y)
+                fit[0] = 0.0
+                fit[1:3] = np.clip(fit[1:3], -1.0, 1.0)
+                fit[3] = -np.clip(fit[3], 0.0, 1.0)
+                out[ty, tx] = fit
+            except np.linalg.LinAlgError:
+                pass
+    return (out / S_MAX).astype(np.float32).ravel()
+
+
 def edge_channel(hdr):
     """
     Sobel magnitude of the 1/2-res log2 luminance, in [0,1].
