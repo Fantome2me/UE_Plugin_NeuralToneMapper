@@ -25,6 +25,7 @@ extern RENDERER_API FRDGBufferRef GetEyeAdaptationBuffer(FRDGBuilder& GraphBuild
 #include "SceneView.h"
 #include "ScreenPass.h"
 #include "ShaderParameterStruct.h"
+#include "NTMOLLF.inl"
 
 
 
@@ -261,6 +262,9 @@ public:
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D<float2>, NTMOLocalCorrection)
 		SHADER_PARAMETER_SAMPLER(SamplerState, NTMOLocalCorrectionSampler)
 		SHADER_PARAMETER(int32, NTMOLocalEnabled)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, LLFImage)
+		SHADER_PARAMETER(FVector4f, LLFRect)
+		SHADER_PARAMETER(float, LLFMix)
 		SHADER_PARAMETER(float, NTMOLutSize)
 		SHADER_PARAMETER(float, NTMOLutScale)
 		SHADER_PARAMETER(float, NTMOLutOffset)
@@ -924,6 +928,9 @@ FScreenPassTexture FNTMORenderer::AddPasses(
 	// by the tonemap pass that already runs.
 	const UNTMOSettings* LocalSettings = GetDefault<UNTMOSettings>();
 	const int32 LocalOverride = CVarNTMOLocalOverride.GetValueOnRenderThread();
+	const bool UseLLF = CVarNTMOLLF.GetValueOnRenderThread()!=0 && LocalSettings->CurveSource==ENTMOCurveSource::Neural && CVarNTMONeuralOverride.GetValueOnRenderThread()!=0 && LocalOverride!=0 && Ctx.Intensity>0;
+	FRDGTextureRef LLFResult=UseLLF?AddNTMOLLF(GraphBuilder,View,SceneColor,Bloom,EyeAdaptationBuffer,CVarNTMOBloomScale.GetValueOnRenderThread()):SceneColor.Texture;
+	if(UseLLF){static bool Logged=false;if(!Logged){Logged=true;UE_LOG(LogTemp,Log,TEXT("[NTMO] 1.1.5 LLF spatial attention, three trained LUTs and RGB pyramid reconstruction active"));}}
 	const bool bLocalOperator = (LocalOverride >= 0)
 		? (LocalOverride != 0)
 		: LocalSettings->bLocalOperator;
@@ -1422,7 +1429,11 @@ FScreenPassTexture FNTMORenderer::AddPasses(
 		// upsample the previous version needed for its gain map.
 		PassParameters->NTMOLocalCorrection = LocalGainTexture;
 		PassParameters->NTMOLocalCorrectionSampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
-		PassParameters->NTMOLocalEnabled = bLocalOperator ? 1 : 0;
+		PassParameters->NTMOLocalEnabled = bLocalOperator && !UseLLF ? 1 : 0;
+		PassParameters->LLFImage=LLFResult;
+		const FIntRect R=Output.ViewRect;
+		PassParameters->LLFRect=FVector4f(R.Min.X,R.Min.Y,1.f/R.Width(),1.f/R.Height());
+		PassParameters->LLFMix=UseLLF?FMath::Clamp(Ctx.Intensity,0.f,1.f):0.f;
 		PassParameters->NTMOLutSize = (float)LutSize;
 		PassParameters->NTMOLutScale = (float)(LutSize - 1) / (float)LutSize;
 		PassParameters->NTMOLutOffset = 0.5f / (float)LutSize;

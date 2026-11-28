@@ -1,0 +1,13 @@
+#define W_tables 0u
+#define W_embed_weight 44217u
+#define W_embed_bias 44649u
+#define W_attend_in_proj_weight 44665u
+#define W_attend_in_proj_bias 45433u
+#define W_attend_out_proj_weight 45481u
+#define W_attend_out_proj_bias 45737u
+#define W_weights_weight 45753u
+#define W_weights_bias 45801u
+#define W_detail_0_weight 45804u
+#define W_detail_0_bias 46560u
+#define W_detail_2_weight 46572u
+#define W_detail_2_bias 46596u

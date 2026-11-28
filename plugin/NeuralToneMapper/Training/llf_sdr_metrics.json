@@ -1,0 +1,14 @@
+{
+  "gpu": "NVIDIA GeForce RTX 5060 Ti",
+  "train": 675,
+  "valid": 13,
+  "test": 234,
+  "size": [
+    160,
+    96
+  ],
+  "epochs": 8,
+  "val_mae": 0.08019808679819107,
+  "test_mae": 0.08097155707386824,
+  "gamma_only_mae": 0.11970585329919799
+}

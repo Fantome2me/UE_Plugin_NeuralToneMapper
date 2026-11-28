@@ -90,6 +90,9 @@ float NTMO_Log2Lum(float3 LinearColor)
 StructuredBuffer<float4> NTMOEyeAdaptationBuffer;
 float3 NTMOSceneColorTint;
 int NTMOApplyExposure;
+Texture2D LLFImage;
+float4 LLFRect;
+float LLFMix;
 
 // INPUT SIGNATURE MUST MATCH ScreenPass.usf
 // -----------------------------------------
@@ -163,6 +166,18 @@ void MainPS(
 	// HDR uses 1.0 == 100 nits, so a generic saturate here destroyed highlights
 	// before PQ/scRGB encoding. Keep HDR headroom and cap only to the display peak.
 	Mapped = min(max(Mapped, 0.0f), NTMOOutputPeakLinear);
+	if (LLFMix > 0) {
+		float3 code=saturate(LLFImage.SampleLevel(NTMOLocalCorrectionSampler,(SvPosition.xy-LLFRect.xy)*LLFRect.zw,0).rgb);
+		float3 ai=lerp(code/12.92,pow((code+.055)/1.055,2.4),step(.04045,code));
+		if(NTMOOutputDevice==NTMO_OUTPUT_PQ || NTMOOutputDevice==NTMO_OUTPUT_SCRGB){
+			// Relative photographic supervision supplies contrast, not absolute luminance.
+			float3 rel=LinearColor/(1+LinearColor);float y=dot(rel,float3(.2126,.7152,.0722));
+			float gain=clamp((dot(ai,float3(.2126,.7152,.0722))+.005)/(y+.005),.67,1.5);
+			float l=max(Mapped.r,max(Mapped.g,Mapped.b));float fade=1-smoothstep(.2*NTMOOutputPeakLinear,.85*NTMOOutputPeakLinear,l);
+			ai=Mapped*lerp(1,gain,fade*.5);
+		}
+		Mapped=clamp(lerp(Mapped,ai,LLFMix),0,NTMOOutputPeakLinear);
+	}
 
 	// Output transfer function, applied last so the correction above stayed linear.
 	float3 Encoded = NTMO_EncodeOutput(Mapped, NTMOOutputDevice, NTMOGamma);
